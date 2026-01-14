@@ -1,0 +1,10 @@
+ag_names:
+  - GPTScorer
+  - GPT5Scorer
+  - DSR1Scorer
+  - DSV3Scorer
+config_mapping:
+  GPTScorer: ./config/gpt_scorer.yaml
+  GPT5Scorer: ./config/gpt5_scorer.yaml
+  DSR1Scorer: ./config/dsr1_scorer.yaml
+  DSV3Scorer: ./config/dsv3_scorer.yaml

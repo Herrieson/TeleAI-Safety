@@ -1,0 +1,21 @@
+[project]
+name = "teleai-safety"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12.10"
+dependencies = [
+    "accelerate>=1.12.0",
+    "datasets>=4.4.2",
+    "detoxify>=0.5.2",
+    "fastchat>=0.1.0",
+    "jsonlines>=4.0.0",
+    "loguru>=0.7.3",
+    "openai>=2.15.0",
+    "pandas>=2.3.3",
+    "peft>=0.18.1",
+    "spacy>=3.8.11",
+    "torch>=2.9.1",
+    "transformers>=4.57.3",
+    "wandb>=0.23.1",
+]

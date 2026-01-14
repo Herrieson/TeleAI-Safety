@@ -1,0 +1,78 @@
+# Byte-compiled / cache artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+*.dist-info/
+*.egg-info/
+.eggs/
+*.egg
+
+# Build outputs
+build/
+dist/
+*.whl
+
+# Virtual environments and local Python settings
+.venv/
+venv/
+env/
+.env
+.env.*
+.envrc
+.secrets/
+secrets.*
+
+# Keys and certificates
+.ssh/
+id_rsa*
+id_dsa*
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*.csr
+*.der
+*.jks
+*.keystore
+*.token
+*service_account*.json
+*.key.json
+*.secret
+*.secrets
+*.credentials
+.python-version
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Localized attack configs (often contain credentials/paths)
+attack/configs/**/*.yaml
+attack/configs/**/*.yml
+attack/configs/**/*.json
+
+# Run outputs
+attack/logs/
+attack/results/
+evaluate/evaluation_report/
+evaluate/results/
+logs/
+*.log
+
+# Model checkpoints and caches
+*.ckpt
+*.pt
+*.bin
+*.safetensors
+*.h5
+.cache/
+.huggingface/
+huggingface/

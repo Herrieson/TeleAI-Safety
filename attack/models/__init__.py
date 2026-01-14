@@ -1,13 +1,21 @@
-from .local_model import *
 from .openai_model import OpenAIModel
-from .vllm_model import VLLMModel
 from .azure_openai_model import AzureOpenAIModel
 from .grok_model import GrokModel
 from .formatter import *
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
 
-def load_model(model_type=None, model_name=None, model_path=None,config=None):
+# Optional heavy deps
+try:
+    from .local_model import LocalModel  # noqa: F401
+except Exception:
+    LocalModel = None
+
+try:
+    from .vllm_model import VLLMModel  # noqa: F401
+except Exception:
+    VLLMModel = None
+
+
+def load_model(model_type=None, model_name=None, model_path=None, config=None):
     if model_type is None:
         return None
     model_name_lower = model_name.lower() if model_name else ""
@@ -42,7 +50,12 @@ def load_model(model_type=None, model_name=None, model_path=None,config=None):
         )
     # ✅ 默认使用 HuggingFace 本地模型
     else:
+        if LocalModel is None:
+            raise ImportError("LocalModel dependencies (e.g., transformers/fastchat/torch) are not installed.")
         print("Loading LocalModel...")
+        from transformers import AutoModelForCausalLM, AutoTokenizer  # lazy import to keep optional
+        import torch
+
         model = AutoModelForCausalLM.from_pretrained(model_path, device_map="auto").eval()
         tokenizer = AutoTokenizer.from_pretrained(model_path)
         if tokenizer.pad_token is None:
@@ -50,11 +63,9 @@ def load_model(model_type=None, model_name=None, model_path=None,config=None):
             tokenizer.pad_token_id = tokenizer.eos_token_id
         torch.cuda.empty_cache()
 
-        # Get generation config from config if available
         generation_config = None
         if config and hasattr(config, 'generation_config'):
             generation_config = config.generation_config
             print(f"Using generation config: {generation_config}")
 
         return LocalModel(model, tokenizer, model_name, generation_config)
-

@@ -459,6 +459,9 @@ class PAIRManager(BaseAttackManager):
                         resp = self.target_model.chat(input_message)
                         if resp is None:
                               resp = "[No response generated]"
+                        # Handle Azure content filter blocks explicitly to avoid treating them as successes
+                        if isinstance(resp, str) and ("Filtered by Content Policy" in resp or "content filter" in resp.lower()):
+                              resp = "[Filtered by Content Policy]"
                         stream.target_responses.append(str(resp))
                         logger.info(f'Generated target response: {resp}')
                   except Exception as e:
@@ -466,7 +469,10 @@ class PAIRManager(BaseAttackManager):
                         stream.target_responses.append(error_msg)
                         logger.error(f'Target model generation failed: {e}')
 
-                  if self.evaluator is not None:
+                  # handle content-filtered responses with a deterministic low score
+                  if stream.target_responses[-1] == "[Filtered by Content Policy]":
+                        stream.eval_results.append(0)
+                  elif self.evaluator is not None:
                         try:
                               self.evaluator(stream)
                         except Exception as e:
@@ -624,4 +630,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,7 +1,13 @@
 from .base_mutation import BaseMutation
 from .rephrase import Rephrase
 from .crossover import CrossOver
-from .synonyms import Synonyms
+
+# Optional dependencies (e.g., nltk); guard to avoid hard failures when unused
+try:
+    from .synonyms import Synonyms  # noqa: F401
+except Exception:
+    Synonyms = None
+
 from .introspect_generation import IntrospectGeneration
 from .disemvowel import Disemvowel
 from .leetspeak import Leetspeak
@@ -24,4 +30,8 @@ from .combination_1 import Combination_1
 from .combination_2 import Combination_2
 from .combination_3 import Combination_3
 from .rot13 import Rot13
-from .advprompteropt import AdvPrompterOpt, advPrompterOpt, evaluate_prompt
+# Optional: advprompter optimizer utilities depend on extra sequence classes
+try:
+    from .advprompteropt import AdvPrompterOpt, advPrompterOpt, evaluate_prompt  # noqa: F401
+except Exception:
+    AdvPrompterOpt = advPrompterOpt = evaluate_prompt = None

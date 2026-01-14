@@ -1,6 +1,6 @@
 import re
 from .base_scorer import BaseScorer
-from aisafetylab.models import OpenAIModel
+from models import OpenAIModel
 from loguru import logger
 
 qi2023finetuning = """
