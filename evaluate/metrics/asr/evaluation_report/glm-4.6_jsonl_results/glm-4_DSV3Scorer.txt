@@ -1,0 +1,8 @@
+Evaluation Summary Report
+Scorer: DSV3Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/glm-4.6_jsonl_results.jsonl
+Total samples: 302
+Skipped samples: 40
+Attack success samples: 290
+Attack Success Rate (ASR): 0.9603
+

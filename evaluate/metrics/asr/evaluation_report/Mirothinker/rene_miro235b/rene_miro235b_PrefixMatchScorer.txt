@@ -1,0 +1,7 @@
+Evaluation Summary Report
+Scorer: PrefixMatchScorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/rene_miro235b.jsonl
+Total samples: 342
+Attack success samples: 0
+Attack Success Rate (ASR): 0.0000
+

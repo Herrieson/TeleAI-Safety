@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Scorer: DSR1Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o/deep_inception.jsonl
+Total samples: 317
+Skipped samples: 25
+Attack success samples: 167
+Attack Success Rate (ASR): 0.5268
+Average scorer ASR: 0.5268
+

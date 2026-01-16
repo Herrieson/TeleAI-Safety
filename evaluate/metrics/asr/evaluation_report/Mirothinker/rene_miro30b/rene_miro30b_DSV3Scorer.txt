@@ -1,0 +1,8 @@
+Evaluation Summary Report
+Scorer: DSV3Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/rene_miro30b.jsonl
+Total samples: 321
+Skipped samples: 21
+Attack success samples: 238
+Attack Success Rate (ASR): 0.7414
+

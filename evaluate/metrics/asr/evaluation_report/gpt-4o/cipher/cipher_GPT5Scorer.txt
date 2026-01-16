@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Scorer: GPT5Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o/cipher.jsonl
+Total samples: 599
+Skipped samples: 85
+Attack success samples: 22
+Attack Success Rate (ASR): 0.0367
+Average scorer ASR: 0.0367
+

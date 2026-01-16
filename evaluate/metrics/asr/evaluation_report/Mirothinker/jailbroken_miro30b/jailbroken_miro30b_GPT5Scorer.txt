@@ -1,0 +1,8 @@
+Evaluation Summary Report
+Scorer: GPT5Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/jailbroken_miro30b.jsonl
+Total samples: 272
+Skipped samples: 70
+Attack success samples: 262
+Attack Success Rate (ASR): 0.9632
+

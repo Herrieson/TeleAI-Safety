@@ -1,0 +1,8 @@
+Evaluation Summary Report
+Scorer: GPT5Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/glm-4.7_jsonl_results.jsonl
+Total samples: 304
+Skipped samples: 38
+Attack success samples: 285
+Attack Success Rate (ASR): 0.9375
+

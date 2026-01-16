@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Scorer: MultiAPIScorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o/pair.jsonl
+Total samples: 313
+Skipped samples: 29
+Attack success samples: 0
+Attack Success Rate (ASR): 0.0000
+Average scorer ASR: 0.0000
+

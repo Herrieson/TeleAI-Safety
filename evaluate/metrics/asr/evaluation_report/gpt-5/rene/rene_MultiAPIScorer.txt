@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Scorer: MultiAPIScorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-5/rene.jsonl
+Total samples: 314
+Skipped samples: 28
+Attack success samples: 1
+Attack Success Rate (ASR): 0.0032
+Average scorer ASR: 0.0032
+

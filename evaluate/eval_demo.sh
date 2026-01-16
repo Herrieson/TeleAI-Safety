@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 批量对 results/*.jsonl 运行多个 scorer，并将结果写入 evaluation_report/<输入文件名>/ 下。
+# 批量对 results/*.jsonl 运行多个 scorer，并将结果写入 metrics/asr/evaluation_report/<输入文件名>/ 下。
 # 默认只跑轻量方法（Pattern / Prefix）。如需更多 scorer，可通过环境变量 EVAL_SCORERS 覆盖，例如：
 #   EVAL_SCORERS="PatternScorer PrefixMatchScorer ClassficationScorer" ./eval_demo.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
+ASR_ROOT="${ROOT_DIR}/metrics/asr"
 RESULTS_DIR="${ROOT_DIR}/results"
-OUTPUT_ROOT="${ROOT_DIR}/evaluation_report"
+OUTPUT_ROOT="${ASR_ROOT}/evaluation_report"
 
 # 默认 scorer 列表（按需扩展）
 DEFAULT_SCORERS=("PatternScorer" "PrefixMatchScorer" "ClassficationScorer" "GPTScorer" "GPT5Scorer" "DSV3Scorer" "DSR1Scorer" "MultiAPIScorer")
@@ -22,14 +23,14 @@ fi
 
 # 配置文件映射
 declare -A CONFIG_MAP=(
-  ["PatternScorer"]="${ROOT_DIR}/config/pattern_scorer.yaml"
-  ["PrefixMatchScorer"]="${ROOT_DIR}/config/prefix_match_scorer.yaml"
-  ["ClassficationScorer"]="${ROOT_DIR}/config/classfication_scorer.yaml"
-  ["GPTScorer"]="${ROOT_DIR}/config/gpt_scorer.yaml"
-  ["GPT5Scorer"]="${ROOT_DIR}/config/gpt5_scorer.yaml"
-  ["DSV3Scorer"]="${ROOT_DIR}/config/dsv3_scorer.yaml"
-  ["DSR1Scorer"]="${ROOT_DIR}/config/dsr1_scorer.yaml"
-  ["MultiAPIScorer"]="${ROOT_DIR}/config/multi_api_scorer.yaml"
+  ["PatternScorer"]="${ASR_ROOT}/config/pattern_scorer.yaml"
+  ["PrefixMatchScorer"]="${ASR_ROOT}/config/prefix_match_scorer.yaml"
+  ["ClassficationScorer"]="${ASR_ROOT}/config/classfication_scorer.yaml"
+  ["GPTScorer"]="${ASR_ROOT}/config/gpt_scorer.yaml"
+  ["GPT5Scorer"]="${ASR_ROOT}/config/gpt5_scorer.yaml"
+  ["DSV3Scorer"]="${ASR_ROOT}/config/dsv3_scorer.yaml"
+  ["DSR1Scorer"]="${ASR_ROOT}/config/dsr1_scorer.yaml"
+  ["MultiAPIScorer"]="${ASR_ROOT}/config/multi_api_scorer.yaml"
 )
 
 mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" | sort)
@@ -66,9 +67,10 @@ for json_path in "${result_files[@]}"; do
       continue
     fi
     echo "Running ${scorer} on ${rel_path}"
-    uv run python eval_summary_report.py \
-      --scorer="${scorer}" \
-      --config_path="${cfg}" \
+    metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s"}}' "${scorer}" "${cfg}")
+    uv run python evaluate_metrics.py \
+      --metrics="ASR" \
+      --metric_args="${metric_args_json}" \
       --json_path="${json_path}" \
       --output_path="${out_path}"
   done

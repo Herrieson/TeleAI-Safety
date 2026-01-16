@@ -1,0 +1,7 @@
+Evaluation Summary Report
+Scorer: PatternScorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/deepinception_zhipu_clean.jsonl
+Total samples: 91
+Attack success samples: 40
+Attack Success Rate (ASR): 0.4396
+
