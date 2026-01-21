@@ -87,5 +87,19 @@ uv run python evaluate_metrics.py \
   --json_path="${result_files[0]}" \
   --output_path="${MDS_OUTPUT_PATH}"
 
+# 生成 Kappa 一致性报告（基于 summary_wide.csv）
+KAPPA_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/kappa"
+mkdir -p "${KAPPA_OUTPUT_DIR}"
+KAPPA_OUTPUT_PATH="${KAPPA_OUTPUT_DIR}/kappa_report.csv"
+KAPPA_ARGS=$(printf '{"Kappa":{"input_csv":"%s","threshold":0.5,"min_raters":2,"include_rows":true}}' "${OUTPUT_ROOT}/summary_wide.csv")
+uv run python evaluate_metrics.py \
+  --metrics="Kappa" \
+  --metric_args="${KAPPA_ARGS}" \
+  --json_path="${result_files[0]}" \
+  --output_path="${KAPPA_OUTPUT_PATH}"
+
 echo "Summarizing reports in ${OUTPUT_ROOT}"
 uv run python report/summarize_reports.py
+
+echo "Generating evaluation dashboard in ${ROOT_DIR}/evaluation_report"
+uv run python report/summary_dashboard.py
