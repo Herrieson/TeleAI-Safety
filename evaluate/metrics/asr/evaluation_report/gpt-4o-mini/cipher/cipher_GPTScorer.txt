@@ -1,8 +1,0 @@
-Evaluation Summary Report
-Scorer: GPTScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o-mini/cipher.jsonl
-Total samples: 599
-Skipped samples: 85
-Attack success samples: 34
-Attack Success Rate (ASR): 0.0568
-

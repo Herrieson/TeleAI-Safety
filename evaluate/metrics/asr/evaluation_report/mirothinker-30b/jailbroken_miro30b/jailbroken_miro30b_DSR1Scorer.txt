@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Metric: ASR
-Scorer: DSR1Scorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/mirothinker-30b/jailbroken_miro30b.jsonl
-Total samples: 311
-Skipped samples: 31
-Attack success samples: 293
-Attack Success Rate (ASR): 0.9421
-Average scorer ASR: 0.9421

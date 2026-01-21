@@ -6,8 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-ASR_ROOT = os.path.join(PROJECT_ROOT, "metrics", "asr")
-REPORT_DIR = os.path.join(ASR_ROOT, "evaluation_report")
+REPORT_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr")
 # 评测输入数据放在项目根的 results/ 下
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 LONG_CSV = os.path.join(REPORT_DIR, "summary_long.csv")

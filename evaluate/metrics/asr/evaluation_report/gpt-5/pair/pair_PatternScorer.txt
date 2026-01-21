@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Scorer: PatternScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-5/pair.jsonl
-Total samples: 49
-Skipped samples: 0
-Attack success samples: 49
-Attack Success Rate (ASR): 1.0000
-Average scorer ASR: 1.0000
-

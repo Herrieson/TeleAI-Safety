@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Scorer: GPTScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o/rene.jsonl
-Total samples: 299
-Skipped samples: 43
-Attack success samples: 126
-Attack Success Rate (ASR): 0.4214
-Average scorer ASR: 0.4214
-

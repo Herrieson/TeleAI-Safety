@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Metric: ASR
-Scorer: ClassficationScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/mirothinker-30b/pair_miro30b.jsonl
-Total samples: 315
-Skipped samples: 0
-Attack success samples: 225
-Attack Success Rate (ASR): 0.7143
-Average scorer ASR: 0.7143

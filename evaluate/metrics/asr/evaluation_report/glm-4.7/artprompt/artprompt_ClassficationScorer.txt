@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Metric: ASR
-Scorer: ClassficationScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/glm-4.7/artprompt.jsonl
-Total samples: 342
-Skipped samples: 0
-Attack success samples: 223
-Attack Success Rate (ASR): 0.6520
-Average scorer ASR: 0.6520

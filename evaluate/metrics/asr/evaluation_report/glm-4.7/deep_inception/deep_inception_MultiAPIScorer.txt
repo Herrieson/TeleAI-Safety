@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Metric: ASR
-Scorer: MultiAPIScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/glm-4.7/deep_inception.jsonl
-Total samples: 91
-Skipped samples: 0
-Attack success samples: 73
-Attack Success Rate (ASR): 0.8022
-Average scorer ASR: 0.8022

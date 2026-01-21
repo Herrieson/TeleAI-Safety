@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Scorer: DSR1Scorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-5/cipher.jsonl
-Total samples: 606
-Skipped samples: 78
-Attack success samples: 1
-Attack Success Rate (ASR): 0.0017
-Average scorer ASR: 0.0017
-

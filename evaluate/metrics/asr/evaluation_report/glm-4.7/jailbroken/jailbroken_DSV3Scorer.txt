@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Metric: ASR
-Scorer: DSV3Scorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/glm-4.7/jailbroken.jsonl
-Total samples: 136
-Skipped samples: 14
-Attack success samples: 92
-Attack Success Rate (ASR): 0.6765
-Average scorer ASR: 0.6765

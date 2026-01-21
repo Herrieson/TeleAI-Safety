@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Metric: ASR
-Scorer: PrefixMatchScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o-mini/artprompt.jsonl
-Total samples: 342
-Skipped samples: 0
-Attack success samples: 6
-Attack Success Rate (ASR): 0.0175
-Average scorer ASR: 0.0175

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 批量对 results/*.jsonl 运行多个 scorer，并将结果写入 metrics/asr/evaluation_report/<输入文件名>/ 下。
+# 批量对 results/*.jsonl 运行多个 scorer，并将结果写入 evaluation_report/asr/<输入文件名>/ 下。
 # 默认只跑轻量方法（Pattern / Prefix）。如需更多 scorer，可通过环境变量 EVAL_SCORERS 覆盖，例如：
 #   EVAL_SCORERS="PatternScorer PrefixMatchScorer ClassficationScorer" ./eval_demo.sh
 
@@ -10,7 +10,7 @@ cd "${ROOT_DIR}"
 
 ASR_ROOT="${ROOT_DIR}/metrics/asr"
 RESULTS_DIR="${ROOT_DIR}/results"
-OUTPUT_ROOT="${ASR_ROOT}/evaluation_report"
+OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/asr"
 
 # 默认 scorer 列表（按需扩展）
 DEFAULT_SCORERS=("PatternScorer" "PrefixMatchScorer" "ClassficationScorer" "GPTScorer" "GPT5Scorer" "DSV3Scorer" "DSR1Scorer" "MultiAPIScorer")
@@ -75,3 +75,17 @@ for json_path in "${result_files[@]}"; do
       --output_path="${out_path}"
   done
 done
+
+# 生成所有模型的 MDS 汇总报告（基于 ASR evaluation_report 目录）
+MDS_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/mds"
+mkdir -p "${MDS_OUTPUT_DIR}"
+MDS_OUTPUT_PATH="${MDS_OUTPUT_DIR}/mds_report.txt"
+MDS_ARGS=$(printf '{"MDS":{"report_root":"%s","lambda_penalty":1.0}}' "${OUTPUT_ROOT}")
+uv run python evaluate_metrics.py \
+  --metrics="MDS" \
+  --metric_args="${MDS_ARGS}" \
+  --json_path="${result_files[0]}" \
+  --output_path="${MDS_OUTPUT_PATH}"
+
+echo "Summarizing reports in ${OUTPUT_ROOT}"
+uv run python report/summarize_reports.py

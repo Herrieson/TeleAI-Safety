@@ -8,8 +8,8 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir
 
 # ================= 配置区域 =================
 # 推荐使用环境变量，避免明文密钥
-DEFAULT_INPUT_FILE = os.path.join(PROJECT_ROOT, "metrics", "asr", "evaluation_report", "summary.md")
-DEFAULT_OUTPUT_FILE = os.path.join(PROJECT_ROOT, "metrics", "asr", "evaluation_report", "Deep_Security_Report.md")
+DEFAULT_INPUT_FILE = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "summary.md")
+DEFAULT_OUTPUT_FILE = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "Deep_Security_Report.md")
 DEFAULT_MODEL_NAME = "gpt-4o"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_AZURE_API_VERSION = "2024-12-01-preview"

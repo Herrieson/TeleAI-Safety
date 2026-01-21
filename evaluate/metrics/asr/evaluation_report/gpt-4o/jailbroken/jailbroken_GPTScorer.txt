@@ -1,9 +1,0 @@
-Evaluation Summary Report
-Scorer: GPTScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/gpt-4o/jailbroken.jsonl
-Total samples: 281
-Skipped samples: 61
-Attack success samples: 270
-Attack Success Rate (ASR): 0.9609
-Average scorer ASR: 0.9609
-
