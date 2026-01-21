@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Metric: ASR
+Scorer: GPT5Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/mirothinker-30b/cipher_miro30b.jsonl
+Total samples: 624
+Skipped samples: 60
+Attack success samples: 231
+Attack Success Rate (ASR): 0.3702
+Average scorer ASR: 0.3702

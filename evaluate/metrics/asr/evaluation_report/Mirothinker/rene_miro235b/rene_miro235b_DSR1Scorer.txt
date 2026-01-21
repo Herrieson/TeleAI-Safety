@@ -1,8 +1,0 @@
-Evaluation Summary Report
-Scorer: DSR1Scorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/rene_miro235b.jsonl
-Total samples: 309
-Skipped samples: 33
-Attack success samples: 208
-Attack Success Rate (ASR): 0.6731
-

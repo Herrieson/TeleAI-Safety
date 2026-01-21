@@ -1,8 +1,0 @@
-Evaluation Summary Report
-Scorer: GPTScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/cipher_miro235b.jsonl
-Total samples: 605
-Skipped samples: 79
-Attack success samples: 269
-Attack Success Rate (ASR): 0.4446
-

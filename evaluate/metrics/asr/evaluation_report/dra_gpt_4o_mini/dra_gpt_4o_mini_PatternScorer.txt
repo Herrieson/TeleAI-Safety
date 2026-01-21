@@ -1,7 +1,0 @@
-Evaluation Summary Report
-Scorer: PatternScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/dra_gpt_4o_mini.jsonl
-Total samples: 342
-Attack success samples: 307
-Attack Success Rate (ASR): 0.8977
-

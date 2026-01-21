@@ -1,7 +1,0 @@
-Evaluation Summary Report
-Scorer: PatternScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/cipher_miro30b.jsonl
-Total samples: 684
-Attack success samples: 155
-Attack Success Rate (ASR): 0.2266
-

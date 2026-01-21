@@ -1,8 +1,0 @@
-Evaluation Summary Report
-Scorer: MultiAPIScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/rene_miro30b.jsonl
-Total samples: 327
-Skipped samples: 15
-Attack success samples: 262
-Attack Success Rate (ASR): 0.8012
-

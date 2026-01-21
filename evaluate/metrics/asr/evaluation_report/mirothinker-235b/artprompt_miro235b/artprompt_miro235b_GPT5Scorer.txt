@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Metric: ASR
+Scorer: GPT5Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/mirothinker-235b/artprompt_miro235b.jsonl
+Total samples: 235
+Skipped samples: 25
+Attack success samples: 197
+Attack Success Rate (ASR): 0.8383
+Average scorer ASR: 0.8383

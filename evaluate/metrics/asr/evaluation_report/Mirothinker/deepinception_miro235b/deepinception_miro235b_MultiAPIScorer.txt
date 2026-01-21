@@ -1,8 +1,0 @@
-Evaluation Summary Report
-Scorer: MultiAPIScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/deepinception_miro235b.jsonl
-Total samples: 325
-Skipped samples: 17
-Attack success samples: 288
-Attack Success Rate (ASR): 0.8862
-

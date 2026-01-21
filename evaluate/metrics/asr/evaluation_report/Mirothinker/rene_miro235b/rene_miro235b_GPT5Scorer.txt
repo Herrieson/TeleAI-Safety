@@ -1,8 +1,0 @@
-Evaluation Summary Report
-Scorer: GPT5Scorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/Mirothinker/rene_miro235b.jsonl
-Total samples: 314
-Skipped samples: 28
-Attack success samples: 206
-Attack Success Rate (ASR): 0.6561
-

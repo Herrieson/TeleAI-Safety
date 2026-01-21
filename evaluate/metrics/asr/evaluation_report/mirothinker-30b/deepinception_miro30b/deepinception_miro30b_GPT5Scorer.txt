@@ -1,0 +1,9 @@
+Evaluation Summary Report
+Metric: ASR
+Scorer: GPT5Scorer
+Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/mirothinker-30b/deepinception_miro30b.jsonl
+Total samples: 303
+Skipped samples: 39
+Attack success samples: 260
+Attack Success Rate (ASR): 0.8581
+Average scorer ASR: 0.8581

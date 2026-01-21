@@ -1,7 +1,0 @@
-Evaluation Summary Report
-Scorer: ClassficationScorer
-Input file: /home/hyx/workplace/TeleAI-Safety/evaluate/results/jailbroken_zhipu_clean.jsonl
-Total samples: 150
-Attack success samples: 17
-Attack Success Rate (ASR): 0.1133
-
