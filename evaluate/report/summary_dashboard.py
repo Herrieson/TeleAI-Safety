@@ -1,6 +1,7 @@
 import argparse
 import csv
 import os
+import re
 from typing import Dict, List, Optional, Set, Tuple
 
 
@@ -11,6 +12,11 @@ DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
 DEFAULT_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap.png")
 DEFAULT_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png")
 DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png")
+DEFAULT_METRIC_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_metrics.png")
+DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
+DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
+DEFAULT_CM_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "cm")
+DEFAULT_KAPPA_CSV = os.path.join(PROJECT_ROOT, "evaluation_report", "kappa", "kappa_report.csv")
 
 
 KNOWN_ATTACKS = [
@@ -352,12 +358,73 @@ def generate_plots(
     return created
 
 
+def generate_metric_bar(
+    metric_summary: List[Dict[str, str]],
+    output_path: str,
+) -> List[str]:
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "sans-serif",
+        ]
+    except ImportError:
+        print("matplotlib not available; skipping metric bar plot.")
+        return []
+
+    labels: List[str] = []
+    bias_vals: List[float] = []
+    wsl_vals: List[float] = []
+    cm_vals: List[float] = []
+    for row in metric_summary:
+        try:
+            bias_vals.append(float(row["bias"]))
+            wsl_vals.append(float(row["wsl"]))
+            cm_vals.append(float(row["cm"]))
+        except (TypeError, ValueError):
+            continue
+        labels.append(row["model"])
+
+    if not labels:
+        return []
+
+    x = np.arange(len(labels))
+    width = 0.25
+    fig_w = max(8.0, len(labels) * 1.0)
+    fig, ax = plt.subplots(figsize=(fig_w, 5.0))
+    ax.bar(x - width, bias_vals, width, label="Bias", color="#4C78A8")
+    ax.bar(x, wsl_vals, width, label="WSL", color="#F58518")
+    ax.bar(x + width, cm_vals, width, label="CM", color="#54A24B")
+    ax.set_ylabel("Metric Value", fontsize=11, labelpad=10)
+    ax.set_title("Model Bias/WSL/CM (Avg across attacks)", fontsize=14, fontweight="bold", pad=20, loc="left")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
+    ax.legend(frameon=False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#cccccc")
+    ax.spines["bottom"].set_color("#cccccc")
+    ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.2)
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return [output_path]
+
+
 def write_markdown(
     output_path: str,
     model_summary: List[Dict[str, str]],
     attack_list: List[str],
     matrix_rows: List[Dict[str, str]],
     mds_rows: List[Dict[str, str]],
+    metric_summary: List[Dict[str, str]],
+    kappa_summary: Optional[Dict[str, str]],
     plot_paths: List[str],
     unparsed: List[str],
     input_path: str,
@@ -444,10 +511,43 @@ def write_markdown(
                 )
             )
 
+    if metric_summary:
+        lines.extend(
+            [
+                "",
+                "## Model Bias/WSL/CM Summary (Average across attacks)",
+                "",
+                "| Model | Bias | WSL | CM |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for row in metric_summary:
+            lines.append(
+                "| {model} | {bias} | {wsl} | {cm} |".format(
+                    **row
+                )
+            )
+        metric_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_METRIC_BAR)),
+            None,
+        )
+        if metric_bar_path:
+            rel_metric_bar = os.path.relpath(metric_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Bias/WSL/CM Bar]({rel_metric_bar})"])
+
     if unparsed:
         lines.extend(["", "## Unparsed attack runs", ""])
         for attack_run in sorted(set(unparsed)):
             lines.append(f"- {attack_run}")
+
+    if kappa_summary:
+        lines.extend(["", "## Notes", ""])
+        lines.append(
+            "Kappa summary: avg={avg_kappa}, median={median_kappa}, min={min_kappa}, "
+            "max={max_kappa}, total_rows={total_rows}, skipped_rows={skipped_rows}".format(
+                **kappa_summary
+            )
+        )
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
@@ -497,6 +597,81 @@ def read_mds_reports(mds_dir: str) -> List[Dict[str, str]]:
     return sorted(rows, key=lambda r: r["model"])
 
 
+def read_metric_reports(report_dir: str, value_pattern: str) -> Dict[str, List[float]]:
+    if not os.path.isdir(report_dir):
+        return {}
+    value_re = re.compile(value_pattern, re.IGNORECASE)
+    values: Dict[str, List[float]] = {}
+    for root, _, files in os.walk(report_dir):
+        for fname in files:
+            if not fname.endswith(".txt"):
+                continue
+            path = os.path.join(root, fname)
+            rel = os.path.relpath(path, report_dir)
+            parts = rel.split(os.sep)
+            if not parts:
+                continue
+            model = parts[0]
+            val = None
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    m = value_re.match(line)
+                    if m:
+                        try:
+                            val = float(m.group(1))
+                        except ValueError:
+                            val = None
+                        break
+            if val is None:
+                continue
+            values.setdefault(model, []).append(val)
+    return values
+
+
+def format_model_metric_summary(
+    bias_vals: Dict[str, List[float]],
+    wsl_vals: Dict[str, List[float]],
+    cm_vals: Dict[str, List[float]],
+) -> List[Dict[str, str]]:
+    models = sorted(set(bias_vals) | set(wsl_vals) | set(cm_vals))
+    rows: List[Dict[str, str]] = []
+    for model in models:
+        bias_list = bias_vals.get(model, [])
+        wsl_list = wsl_vals.get(model, [])
+        cm_list = cm_vals.get(model, [])
+        bias_avg = f"{(sum(bias_list) / len(bias_list)):.6f}" if bias_list else ""
+        wsl_avg = f"{(sum(wsl_list) / len(wsl_list)):.6f}" if wsl_list else ""
+        cm_avg = f"{(sum(cm_list) / len(cm_list)):.6f}" if cm_list else ""
+        rows.append(
+            {
+                "model": model,
+                "bias": bias_avg,
+                "wsl": wsl_avg,
+                "cm": cm_avg,
+            }
+        )
+    return rows
+
+
+def read_kappa_summary(path: str) -> Optional[Dict[str, str]]:
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if (row.get("attack_run") or "").strip() == "__summary__":
+                return {
+                    "avg_kappa": (row.get("avg_kappa") or row.get("kappa") or "").strip(),
+                    "median_kappa": (row.get("median_kappa") or "").strip(),
+                    "min_kappa": (row.get("min_kappa") or "").strip(),
+                    "max_kappa": (row.get("max_kappa") or "").strip(),
+                    "total_rows": (row.get("total_rows") or "").strip(),
+                    "skipped_rows": (row.get("skipped_rows") or "").strip(),
+                }
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Summarize evaluation_report/asr/summary_long.csv into a Markdown overview."
@@ -504,9 +679,14 @@ def main() -> None:
     parser.add_argument("--input", default=DEFAULT_INPUT, help="Path to summary_long.csv")
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help="Output Markdown path")
     parser.add_argument("--mds-dir", default=DEFAULT_MDS_DIR, help="Directory with MDS reports")
+    parser.add_argument("--bias-dir", default=DEFAULT_BIAS_DIR, help="Directory with Bias reports")
+    parser.add_argument("--wsl-dir", default=DEFAULT_WSL_DIR, help="Directory with WSL reports")
+    parser.add_argument("--cm-dir", default=DEFAULT_CM_DIR, help="Directory with CM reports")
+    parser.add_argument("--kappa-csv", default=DEFAULT_KAPPA_CSV, help="Kappa report CSV path")
     parser.add_argument("--heatmap", default=DEFAULT_HEATMAP, help="Heatmap image path")
     parser.add_argument("--model-bar", default=DEFAULT_MODEL_BAR, help="Model bar chart path")
     parser.add_argument("--attack-bar", default=DEFAULT_ATTACK_BAR, help="Attack bar chart path")
+    parser.add_argument("--metric-bar", default=DEFAULT_METRIC_BAR, help="Bias/WSL/CM bar chart path")
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     args = parser.parse_args()
 
@@ -523,6 +703,20 @@ def main() -> None:
     attack_list, matrix_rows = format_model_attack_matrix(rows)
     mds_dir = os.path.abspath(args.mds_dir)
     mds_rows = read_mds_reports(mds_dir)
+    bias_vals = read_metric_reports(
+        os.path.abspath(args.bias_dir),
+        r"^Mean\(response_label - question_label\):\s*([0-9.\-]+)",
+    )
+    wsl_vals = read_metric_reports(
+        os.path.abspath(args.wsl_dir),
+        r"^Mean weighted loss:\s*([0-9.\-]+)",
+    )
+    cm_vals = read_metric_reports(
+        os.path.abspath(args.cm_dir),
+        r"^Mean cost:\s*([0-9.\-]+)",
+    )
+    metric_summary = format_model_metric_summary(bias_vals, wsl_vals, cm_vals)
+    kappa_summary = read_kappa_summary(os.path.abspath(args.kappa_csv))
     plot_paths: List[str] = []
     if not args.no_plots:
         plot_paths = generate_plots(
@@ -531,12 +725,20 @@ def main() -> None:
             os.path.abspath(args.model_bar),
             os.path.abspath(args.attack_bar),
         )
+        plot_paths.extend(
+            generate_metric_bar(
+                metric_summary,
+                os.path.abspath(args.metric_bar),
+            )
+        )
     write_markdown(
         args.output,
         model_summary,
         attack_list,
         matrix_rows,
         mds_rows,
+        metric_summary,
+        kappa_summary,
         plot_paths,
         unparsed,
         input_path,

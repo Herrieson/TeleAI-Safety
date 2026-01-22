@@ -33,15 +33,27 @@ declare -A CONFIG_MAP=(
   ["MultiAPIScorer"]="${ASR_ROOT}/config/multi_api_scorer.yaml"
 )
 
-mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" | sort)
+mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" ! -path "${RESULTS_DIR}/ternary/*" | sort)
 if [[ ${#result_files[@]} -eq 0 ]]; then
   echo "No jsonl files found in ${RESULTS_DIR}" >&2
   exit 1
 fi
 
+filtered_result_files=()
+for json_path in "${result_files[@]}"; do
+  if [[ "$(basename "${json_path}")" == "any.jsonl" ]]; then
+    continue
+  fi
+  filtered_result_files+=("${json_path}")
+done
+if [[ ${#filtered_result_files[@]} -eq 0 ]]; then
+  echo "No jsonl files found in ${RESULTS_DIR} after excluding placeholder any.jsonl" >&2
+  exit 1
+fi
+
 mkdir -p "${OUTPUT_ROOT}"
 
-for json_path in "${result_files[@]}"; do
+for json_path in "${filtered_result_files[@]}"; do
   # 相对 results 的子路径（去掉扩展）
   rel_path="${json_path#${RESULTS_DIR}/}"
   rel_no_ext="${rel_path%.jsonl}"
@@ -84,7 +96,7 @@ MDS_ARGS=$(printf '{"MDS":{"report_root":"%s","lambda_penalty":1.0}}' "${OUTPUT_
 uv run python evaluate_metrics.py \
   --metrics="MDS" \
   --metric_args="${MDS_ARGS}" \
-  --json_path="${result_files[0]}" \
+  --json_path="${filtered_result_files[0]}" \
   --output_path="${MDS_OUTPUT_PATH}"
 
 # 生成 Kappa 一致性报告（基于 summary_wide.csv）
@@ -95,11 +107,70 @@ KAPPA_ARGS=$(printf '{"Kappa":{"input_csv":"%s","threshold":0.5,"min_raters":2,"
 uv run python evaluate_metrics.py \
   --metrics="Kappa" \
   --metric_args="${KAPPA_ARGS}" \
-  --json_path="${result_files[0]}" \
+  --json_path="${filtered_result_files[0]}" \
   --output_path="${KAPPA_OUTPUT_PATH}"
 
+# 计算平均各个 scorer 的平均 ASR 并总结到 csv，markdown 文件中
 echo "Summarizing reports in ${OUTPUT_ROOT}"
 uv run python report/summarize_reports.py
 
+# 标注三分类标签
+TERNARY_DIR="${RESULTS_DIR}/ternary"
+if [[ -d "${TERNARY_DIR}" ]]; then
+  if [[ -z "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
+    echo "AZURE_OPENAI_DEPLOYMENT is required for ternary labeling." >&2
+    exit 1
+  fi
+  mapfile -t ternary_files < <(find "${TERNARY_DIR}" -type f -name "*.jsonl" | sort)
+  if [[ ${#ternary_files[@]} -eq 0 ]]; then
+    echo "No ternary jsonl files found in ${TERNARY_DIR}" >&2
+  else
+    echo "Running ternary labeling in ${TERNARY_DIR}"
+    for json_path in "${ternary_files[@]}"; do
+      if uv run python - "${json_path}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        obj = json.loads(line)
+        has_q = "question_label" in obj
+        has_r = "response_label" in obj
+        sys.exit(0 if has_q and has_r else 1)
+sys.exit(1)
+PY
+      then
+        echo "Skip ternary labeling (already labeled): ${json_path}"
+        continue
+      fi
+      uv run python metrics/ternary_metrics.py \
+        --input "${json_path}" \
+        --judge-deployment "${AZURE_OPENAI_DEPLOYMENT}"
+    done
+    echo "Running bias metrics in ${TERNARY_DIR}" # 计算 bias
+    for json_path in "${ternary_files[@]}"; do
+      uv run python metrics/bias_metrics.py --input "${json_path}"
+    done
+    echo "Running WSL metrics in ${TERNARY_DIR}" # 计算加权安全损失
+    for json_path in "${ternary_files[@]}"; do
+      uv run python metrics/wsl_metrics.py --input "${json_path}"
+    done
+    echo "Running cost matrix metrics in ${TERNARY_DIR}" # 计算代价矩阵
+    for json_path in "${ternary_files[@]}"; do
+      uv run python metrics/cm_metrics.py --input "${json_path}"
+    done
+  fi
+fi
+
+# 生成最终的 evaluation dashboard 报告，包括可视化内容，但只包含数据，不包括 LLM 对数据的分析
 echo "Generating evaluation dashboard in ${ROOT_DIR}/evaluation_report"
 uv run python report/summary_dashboard.py
+
+# 生成结构化事实与深度评测报告（默认不调用 LLM）
+echo "Generating facts and deep report in ${ROOT_DIR}/evaluation_report"
+uv run python report/facts_builder.py
+uv run python report/final_report.py --provider azure --model "${AZURE_OPENAI_DEPLOYMENT}"
