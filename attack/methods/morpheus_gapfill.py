@@ -278,6 +278,11 @@ class MorpheusGapFillManager(BaseAttackManager):
             return example.get("goal") or example.get("query")
         return getattr(example, "goal", None) or getattr(example, "query", None)
 
+    def mutate(self, query: str, target: str = "") -> str:
+        attack_goal = query
+        result = self.run_single_conversation(attack_goal)
+        return result.get("final_query", "")
+
     def run_single_conversation(self, attack_goal: str) -> Dict[str, Any]:
         history: List[Dict[str, Any]] = []
         final_response = ""
