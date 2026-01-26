@@ -12,7 +12,10 @@ DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
 DEFAULT_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap.png")
 DEFAULT_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png")
 DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png")
-DEFAULT_METRIC_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_metrics.png")
+DEFAULT_METRIC_PANEL = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias_wsl_cm.png")
+DEFAULT_MDS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_mds.png")
+DEFAULT_RADAR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_radar")
+DEFAULT_RADAR_FILE = "summary_radar_all.png"
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 DEFAULT_CM_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "cm")
@@ -358,8 +361,11 @@ def generate_plots(
     return created
 
 
-def generate_metric_bar(
-    metric_summary: List[Dict[str, str]],
+def generate_metric_panel(
+    labels: List[str],
+    bias_vals: List[float],
+    wsl_vals: List[float],
+    cm_vals: List[float],
     output_path: str,
 ) -> List[str]:
     try:
@@ -373,9 +379,64 @@ def generate_metric_bar(
             "sans-serif",
         ]
     except ImportError:
-        print("matplotlib not available; skipping metric bar plot.")
+        print("matplotlib not available; skipping metric panel plot.")
         return []
 
+    if not labels or not bias_vals or not wsl_vals or not cm_vals:
+        return []
+
+    fig_w = max(12.0, len(labels) * 1.1)
+    fig, axes = plt.subplots(1, 3, figsize=(fig_w, 4.8), sharey=False)
+    fig.suptitle("Model Bias / WSL / CM (Avg across attacks)", fontsize=14, fontweight="bold", y=1.02)
+
+    panels = [
+        ("Bias", bias_vals, "Blues"),
+        ("WSL", wsl_vals, "Oranges"),
+        ("CM", cm_vals, "Greens"),
+    ]
+    x = np.arange(len(labels))
+    for ax, (title, values, cmap_name) in zip(axes, panels):
+        cmap = plt.get_cmap(cmap_name)
+        min_v = min(values)
+        max_v = max(values)
+        if max_v == min_v:
+            colors = [cmap(0.6) for _ in values]
+        else:
+            colors = [cmap(0.3 + 0.5 * ((v - min_v) / (max_v - min_v))) for v in values]
+        bars = ax.bar(x, values, width=0.6, color=colors, alpha=0.95)
+        ax.set_title(title, fontsize=12, fontweight="bold", loc="left", pad=12)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color("#cccccc")
+        ax.spines["bottom"].set_color("#cccccc")
+        ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.2)
+        ax.set_axisbelow(True)
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height + (0.01 if height >= 0 else -0.01),
+                f"{height:.2f}",
+                ha="center",
+                va="bottom" if height >= 0 else "top",
+                fontsize=8,
+                color="#555555",
+            )
+        ax.set_ylabel("Metric Value", fontsize=10, labelpad=6)
+
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return [output_path]
+
+
+def generate_metric_panel_from_summary(
+    metric_summary: List[Dict[str, str]],
+    output_path: str,
+) -> List[str]:
     labels: List[str] = []
     bias_vals: List[float] = []
     wsl_vals: List[float] = []
@@ -392,18 +453,55 @@ def generate_metric_bar(
     if not labels:
         return []
 
-    x = np.arange(len(labels))
-    width = 0.25
+    return generate_metric_panel(labels, bias_vals, wsl_vals, cm_vals, output_path)
+
+
+def generate_mds_bar(mds_rows: List[Dict[str, str]], output_path: str) -> List[str]:
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "sans-serif",
+        ]
+    except ImportError:
+        print("matplotlib not available; skipping MDS bar plot.")
+        return []
+
+    values = []
+    for row in mds_rows:
+        try:
+            values.append((row["model"], float(row["mds"])))
+        except (TypeError, ValueError):
+            continue
+
+    if not values:
+        return []
+
+    values.sort(key=lambda item: item[1])
+    labels = [item[0] for item in values]
+    mds_vals = [item[1] for item in values]
     fig_w = max(8.0, len(labels) * 1.0)
     fig, ax = plt.subplots(figsize=(fig_w, 5.0))
-    ax.bar(x - width, bias_vals, width, label="Bias", color="#4C78A8")
-    ax.bar(x, wsl_vals, width, label="WSL", color="#F58518")
-    ax.bar(x + width, cm_vals, width, label="CM", color="#54A24B")
-    ax.set_ylabel("Metric Value", fontsize=11, labelpad=10)
-    ax.set_title("Model Bias/WSL/CM (Avg across attacks)", fontsize=14, fontweight="bold", pad=20, loc="left")
-    ax.set_xticks(x)
+    ax.set_ylabel("MDS", fontsize=11, labelpad=10)
+    ax.set_title("Model MDS (Ascending)", fontsize=14, fontweight="bold", pad=20, loc="left")
+    colors = plt.cm.viridis(np.linspace(0.3, 0.8, len(mds_vals)))
+    bars = ax.bar(labels, mds_vals, color=colors, alpha=0.9, width=0.6)
     ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
-    ax.legend(frameon=False)
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + 0.01,
+            f"{height:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            color="#555555",
+        )
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color("#cccccc")
@@ -415,6 +513,165 @@ def generate_metric_bar(
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return [output_path]
+
+
+def read_kappa_by_model(path: str) -> Dict[str, List[float]]:
+    if not os.path.isfile(path):
+        return {}
+    values: Dict[str, List[float]] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            attack_run = (row.get("attack_run") or "").strip()
+            if not attack_run or attack_run == "__summary__":
+                continue
+            parsed = parse_attack_run(attack_run)
+            if not parsed:
+                continue
+            model, _ = parsed
+            kappa_raw = (row.get("kappa") or "").strip()
+            if not kappa_raw:
+                continue
+            try:
+                kappa_val = float(kappa_raw)
+            except ValueError:
+                continue
+            values.setdefault(model, []).append(kappa_val)
+    return values
+
+
+def _sanitize_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
+    return cleaned or "model"
+
+
+def _normalize_metric(
+    values: Dict[str, float],
+    higher_is_better: bool,
+) -> Dict[str, float]:
+    if not values:
+        return {}
+    min_val = min(values.values())
+    max_val = max(values.values())
+    if max_val == min_val:
+        return {model: 1.0 for model in values}
+    normalized = {}
+    for model, val in values.items():
+        if higher_is_better:
+            norm = (val - min_val) / (max_val - min_val)
+        else:
+            norm = (max_val - val) / (max_val - min_val)
+        normalized[model] = max(0.0, min(1.0, norm))
+    return normalized
+
+
+def generate_radar_plots(
+    model_asr: Dict[str, float],
+    model_mds: Dict[str, float],
+    model_bias: Dict[str, float],
+    model_wsl: Dict[str, float],
+    model_cm: Dict[str, float],
+    output_dir: str,
+) -> List[str]:
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "sans-serif",
+        ]
+    except ImportError:
+        print("matplotlib not available; skipping radar plots.")
+        return []
+
+    metrics = [
+        ("ASR", model_asr, False),
+        ("MDS", model_mds, True),
+        ("Bias", model_bias, False),
+        ("WSL", model_wsl, False),
+        ("CM", model_cm, False),
+    ]
+
+    normalized_maps = {}
+    for label, values, higher_is_better in metrics:
+        normalized_maps[label] = _normalize_metric(values, higher_is_better)
+
+    models = sorted(
+        set(model_asr)
+        & set(model_mds)
+        & set(model_bias)
+        & set(model_wsl)
+        & set(model_cm)
+    )
+    if not models:
+        return []
+
+    labels = [label for label, _, _ in metrics]
+    num_axes = len(labels)
+    angles = np.linspace(0, 2 * np.pi, num_axes, endpoint=False).tolist()
+    angles += angles[:1]
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(8.0, 7.2), subplot_kw={"polar": True})
+    fig.patch.set_facecolor("#fbfbfb")
+    ax.set_facecolor("#fcfcfc")
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels, fontsize=10, fontweight="bold")
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], fontsize=8, color="#888888")
+    ax.grid(color="#dddddd", linestyle="--", linewidth=0.7)
+    ax.spines["polar"].set_color("#dddddd")
+
+    cmap = plt.get_cmap("tab20")
+    fill_alpha = 0.06 if len(models) > 8 else 0.18
+    line_alpha = 0.85 if len(models) > 8 else 0.95
+
+    scored_models = []
+    for model in models:
+        values = [normalized_maps[label].get(model, 0.0) for label, _, _ in metrics]
+        avg_score = sum(values) / len(values) if values else 0.0
+        scored_models.append((model, values, avg_score))
+    scored_models.sort(key=lambda item: item[2], reverse=True)
+
+    line_styles = ["-", "--", "-.", ":"]
+    for idx, (model, values, _) in enumerate(scored_models):
+        values = values + values[:1]
+        color = cmap(idx % cmap.N)
+        ax.plot(
+            angles,
+            values,
+            color=color,
+            linewidth=2.0,
+            alpha=line_alpha,
+            marker="o",
+            markersize=3.5,
+            linestyle=line_styles[idx % len(line_styles)],
+            label=model,
+        )
+        ax.fill(angles, values, color=color, alpha=fill_alpha)
+
+    ax.set_title("Model Metrics Radar (Normalized)", fontsize=12, fontweight="bold", pad=18)
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.02),
+        frameon=False,
+        fontsize=8,
+        title="Models",
+        title_fontsize=9,
+    )
+    fig.tight_layout()
+
+    path = os.path.join(output_dir, DEFAULT_RADAR_FILE)
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return [path]
 
 
 def write_markdown(
@@ -429,6 +686,7 @@ def write_markdown(
     unparsed: List[str],
     input_path: str,
     mds_dir: str,
+    radar_paths: List[str],
 ) -> None:
     lines = [
         "# Evaluation Overview",
@@ -510,6 +768,13 @@ def write_markdown(
                     **row
                 )
             )
+        mds_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_MDS_BAR)),
+            None,
+        )
+        if mds_bar_path:
+            rel_mds_bar = os.path.relpath(mds_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model MDS Bar]({rel_mds_bar})"])
 
     if metric_summary:
         lines.extend(
@@ -527,13 +792,26 @@ def write_markdown(
                     **row
                 )
             )
-        metric_bar_path = next(
-            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_METRIC_BAR)),
+        metric_panel_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_METRIC_PANEL)),
             None,
         )
-        if metric_bar_path:
-            rel_metric_bar = os.path.relpath(metric_bar_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Model Bias/WSL/CM Bar]({rel_metric_bar})"])
+        if metric_panel_path:
+            rel_metric_panel = os.path.relpath(metric_panel_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Bias/WSL/CM Panel]({rel_metric_panel})"])
+
+    if radar_paths:
+        lines.extend(
+            [
+                "",
+                "## Model Metrics Radar (Normalized)",
+                "",
+                "Radar chart is min-max normalized across models per metric (higher is better).",
+                "",
+            ]
+        )
+        rel_path = os.path.relpath(radar_paths[0], os.path.dirname(output_path))
+        lines.append(f"![Model Radar]({rel_path})")
 
     if unparsed:
         lines.extend(["", "## Unparsed attack runs", ""])
@@ -686,7 +964,9 @@ def main() -> None:
     parser.add_argument("--heatmap", default=DEFAULT_HEATMAP, help="Heatmap image path")
     parser.add_argument("--model-bar", default=DEFAULT_MODEL_BAR, help="Model bar chart path")
     parser.add_argument("--attack-bar", default=DEFAULT_ATTACK_BAR, help="Attack bar chart path")
-    parser.add_argument("--metric-bar", default=DEFAULT_METRIC_BAR, help="Bias/WSL/CM bar chart path")
+    parser.add_argument("--metric-panel", default=DEFAULT_METRIC_PANEL, help="Bias/WSL/CM panel chart path")
+    parser.add_argument("--mds-bar", default=DEFAULT_MDS_BAR, help="MDS bar chart path")
+    parser.add_argument("--radar-dir", default=DEFAULT_RADAR_DIR, help="Radar chart output directory")
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     args = parser.parse_args()
 
@@ -718,6 +998,7 @@ def main() -> None:
     metric_summary = format_model_metric_summary(bias_vals, wsl_vals, cm_vals)
     kappa_summary = read_kappa_summary(os.path.abspath(args.kappa_csv))
     plot_paths: List[str] = []
+    radar_paths: List[str] = []
     if not args.no_plots:
         plot_paths = generate_plots(
             rows,
@@ -726,10 +1007,46 @@ def main() -> None:
             os.path.abspath(args.attack_bar),
         )
         plot_paths.extend(
-            generate_metric_bar(
+            generate_metric_panel_from_summary(
                 metric_summary,
-                os.path.abspath(args.metric_bar),
+                os.path.abspath(args.metric_panel),
             )
+        )
+        plot_paths.extend(
+            generate_mds_bar(
+                mds_rows,
+                os.path.abspath(args.mds_bar),
+            )
+        )
+
+        model_asr = {row["model"]: float(row["avg_asr"]) for row in model_summary if row.get("avg_asr")}
+        model_mds = {
+            row["model"]: float(row["mds"])
+            for row in mds_rows
+            if row.get("mds")
+        }
+        model_bias = {
+            row["model"]: float(row["bias"])
+            for row in metric_summary
+            if row.get("bias")
+        }
+        model_wsl = {
+            row["model"]: float(row["wsl"])
+            for row in metric_summary
+            if row.get("wsl")
+        }
+        model_cm = {
+            row["model"]: float(row["cm"])
+            for row in metric_summary
+            if row.get("cm")
+        }
+        radar_paths = generate_radar_plots(
+            model_asr,
+            model_mds,
+            model_bias,
+            model_wsl,
+            model_cm,
+            os.path.abspath(args.radar_dir),
         )
     write_markdown(
         args.output,
@@ -743,6 +1060,7 @@ def main() -> None:
         unparsed,
         input_path,
         mds_dir,
+        radar_paths,
     )
     print(f"Wrote {args.output}")
 
