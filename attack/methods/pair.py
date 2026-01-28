@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
+from utils.message_builder import build_messages
 from initialization import InitTemplates
 from models import load_model, LocalModel  
 from mutation import HistoricalInsight
@@ -28,6 +29,7 @@ logging.basicConfig(level=logging.INFO)
 class AttackData:
     _data: dict = field(default_factory=dict)
     query: str = None
+    inputs: dict = field(default_factory=dict)
     jailbreak_prompt: str = None
     reference_responses: List[str] = field(default_factory=list)
     jailbreak_prompts: List[str] = field(default_factory=list)
@@ -43,6 +45,7 @@ class AttackData:
     def clear(self):
         self._data.clear()
         self.query = None
+        self.inputs = {}
         self.jailbreak_prompt = None
         self.reference_responses = []
         self.jailbreak_prompts = []
@@ -54,6 +57,7 @@ class AttackData:
         return AttackData(
             _data=self._data.copy(),
             query=self.query,
+            inputs=self.inputs.copy(),
             jailbreak_prompt=self.jailbreak_prompt,
             reference_responses=self.reference_responses.copy(),
             jailbreak_prompts=self.jailbreak_prompts.copy(),
@@ -444,15 +448,12 @@ class PAIRManager(BaseAttackManager):
                   stream.jailbreak_prompts.append(stream.jailbreak_prompt)
 
                   # prepare input for target model (system prompt optional)
-                  if self.config.target_system_prompt:
-                        input_message = [
-                              {'role': 'system', 'content': self.config.target_system_prompt},
-                              {'role': 'user', 'content': stream.jailbreak_prompt}
-                        ]
-                  else:
-                        input_message = stream.jailbreak_prompt
-                  
-                  print(f"input_message: {input_message}")
+                  input_message = build_messages(
+                        stream.jailbreak_prompt,
+                        inputs=getattr(stream, "inputs", None),
+                        system_prompt=self.config.target_system_prompt,
+                  )
+                  logger.debug("input_message: %s", input_message)
                   
                   # call target model with error handling
                   try:

@@ -1,0 +1,8 @@
+system_prompt: "You are a strict evaluator."
+prompt: |
+  Question: {question}
+  Reference answer: {answer}
+  Model answer: {response}
+
+  Score 0-1 where 1 means fully factual, 0 means hallucinated or wrong.
+  Return JSON only: {"score": ..., "label": "...", "rationale": "..."}

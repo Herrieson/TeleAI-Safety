@@ -1,0 +1,22 @@
+dataset:
+  type: jsonl
+  path: data/example.jsonl
+  task: code_safety
+  field_map:
+    id: id
+    question: question
+    answer: answer
+    meta: meta
+
+model:
+  type: local
+  mode: echo
+
+judge:
+  type: rule
+
+metric:
+  type: aggregate
+
+output_path: benchmark_results.jsonl
+summary_path: benchmark_summary.json

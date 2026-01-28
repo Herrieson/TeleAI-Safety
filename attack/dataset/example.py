@@ -3,6 +3,8 @@ import collections
 
 class Example(collections.abc.Mapping):
     def __init__(self, **kwargs):
+        if "inputs" not in kwargs:
+            kwargs["inputs"] = {}
         for key, value in kwargs.items():
             setattr(self, key, value)
 

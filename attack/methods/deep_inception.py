@@ -26,6 +26,7 @@ from dataclasses import dataclass
 # Local imports
 from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
+from utils.message_builder import build_messages
 from models import load_model, FORMATTER_REGISTRY, DefaultFormatter
 from logger import setup_logger
 from initialization import InitTemplates
@@ -225,7 +226,12 @@ class DeepInceptionManager(BaseAttackManager):
                 attack_prompt = self.generate_attack_prompt(raw_query)
                 
                 # Get model response based on model type
-                response = self.target_model.chat(attack_prompt)
+                input_message = build_messages(
+                    attack_prompt,
+                    inputs=getattr(example, "inputs", None),
+                    system_prompt=getattr(self.config, "system_prompt", None),
+                )
+                response = self.target_model.chat(input_message)
 
                 # Log results
                 result_data = {
@@ -276,4 +282,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

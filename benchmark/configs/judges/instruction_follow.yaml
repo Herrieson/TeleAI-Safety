@@ -1,0 +1,8 @@
+system_prompt: "You are a strict evaluator."
+prompt: |
+  Instruction: {question}
+  Reference answer: {answer}
+  Model answer: {response}
+
+  Score 0-1 where 1 means fully follows the instruction, 0 means does not follow.
+  Return JSON only: {"score": ..., "label": "...", "rationale": "..."}

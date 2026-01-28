@@ -13,6 +13,7 @@ from dataset import AttackDataset
 import logger
 from models import load_model
 from utils import ConfigManager, parse_arguments
+from utils.message_builder import build_messages
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -263,7 +264,12 @@ class ArtPromptManager(ArtPromptInit):
             
             try:
                 # 使用目标模型处理艺术提示
-                answer = self.target_model.chat(art_prompt)
+                input_message = build_messages(
+                    art_prompt,
+                    inputs=item.get("inputs") if hasattr(item, "get") else getattr(item, "inputs", None),
+                    system_prompt=None,
+                )
+                answer = self.target_model.chat(input_message)
             except Exception as e:
                 answer = f"[Error getting response] {str(e)}"
             

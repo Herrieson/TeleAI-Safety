@@ -12,6 +12,7 @@ sys.path.append(os.getcwd())
 from dataset import AttackDataset
 from models import load_model
 from utils import BaseAttackManager, ConfigManager, parse_arguments
+from utils.message_builder import build_messages
 
 
 SYSTEM_PROMPT_TEMPLATE = """
@@ -283,7 +284,7 @@ class MorpheusGapFillManager(BaseAttackManager):
         result = self.run_single_conversation(attack_goal)
         return result.get("final_query", "")
 
-    def run_single_conversation(self, attack_goal: str) -> Dict[str, Any]:
+    def run_single_conversation(self, attack_goal: str, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         history: List[Dict[str, Any]] = []
         final_response = ""
         final_prompt = ""
@@ -300,14 +301,11 @@ class MorpheusGapFillManager(BaseAttackManager):
             attacker_prompt = attacker_output.get("prompt", "")
             final_prompt = attacker_prompt
 
-            if self.config.target_system_prompt:
-                target_messages = [
-                    {"role": "system", "content": self.config.target_system_prompt},
-                    {"role": "user", "content": attacker_prompt},
-                ]
-            else:
-                target_messages = [{"role": "user", "content": attacker_prompt}]
-
+            target_messages = build_messages(
+                attacker_prompt,
+                inputs=inputs,
+                system_prompt=self.config.target_system_prompt,
+            )
             target_response = self.target_model.chat(target_messages)
             evaluation = evaluate_with_judge(
                 judge_model=self.judge_model,
@@ -351,7 +349,11 @@ class MorpheusGapFillManager(BaseAttackManager):
             if self.config.skip_completed and attack_goal in self.completed_queries:
                 continue
 
-            result = self.run_single_conversation(attack_goal)
+            if isinstance(example, dict):
+                inputs = example.get("inputs")
+            else:
+                inputs = getattr(example, "inputs", None)
+            result = self.run_single_conversation(attack_goal, inputs=inputs)
             record = {
                 "example_idx": example_idx + self.config.data_offset,
                 "query": attack_goal,

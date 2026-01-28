@@ -14,6 +14,7 @@ from tqdm import tqdm
 from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from models import load_model
+from utils.message_builder import build_messages
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -207,10 +208,15 @@ class ReneInit:
     def load_data(self):
         """Load dataset or single prompt into self.data.harmful_behaviors"""
         if getattr(self.config, "prompt", None):
-            self.data.harmful_behaviors = [self.config.prompt]
+            self.data.harmful_behaviors = [{"query": self.config.prompt, "inputs": {}}]
         else:
             ds = AttackDataset(self.config.data_path)
-            self.data.harmful_behaviors = [example.get("query", "") for example in ds]
+            items = []
+            for example in ds:
+                query = example.get("query", "")
+                inputs = example.get("inputs") or {}
+                items.append({"query": query, "inputs": inputs})
+            self.data.harmful_behaviors = items
 
 
 # ----------------------- Mutation -----------------------
@@ -349,8 +355,9 @@ class ReneManager(BaseAttackManager):
     #     if not text:
     #         return "[GenerationFailed] No textual response."
     #     return text
-    def _attack_with_model(self, prompt: str) -> str:
-        response = self.target_model.chat(prompt)
+    def _attack_with_model(self, prompt: str, inputs: Optional[dict] = None) -> str:
+        input_message = build_messages(prompt, inputs=inputs, system_prompt=None)
+        response = self.target_model.chat(input_message)
         if not response:
             return "[GenerationFailed] No response from model."
         return response
@@ -374,6 +381,10 @@ class ReneManager(BaseAttackManager):
         logger.info("Rene attack started.")
         for idx, harm_behavior in enumerate(tqdm(self.data.harmful_behaviors, desc="Rene Attacking")):
             start_time = time.time()
+            inputs = None
+            if isinstance(harm_behavior, dict):
+                inputs = harm_behavior.get("inputs")
+                harm_behavior = harm_behavior.get("query", "")
             # 1) mutate prompt
             rewritten = self.mutator.rewrite_prompt(harm_behavior)
             if not rewritten:
@@ -387,7 +398,7 @@ class ReneManager(BaseAttackManager):
             nested = self._nest_scenario(rewritten)
 
             # 4) attack model generation (unified call)
-            attack_output = self._attack_with_model(nested)
+            attack_output = self._attack_with_model(nested, inputs=inputs)
 
             # 5) store minimal JSONL
             self._append_result_minimal(idx, harm_behavior, rewritten, attack_output)

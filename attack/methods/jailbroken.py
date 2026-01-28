@@ -27,6 +27,7 @@ from types import SimpleNamespace
 
 from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
+from utils.message_builder import build_messages
 from evaluation import PatternScorer, HarmBenchScorer
 from mutation import *
 from models import load_model, LocalModel, OpenAIModel, FORMATTER_REGISTRY, DefaultFormatter
@@ -212,7 +213,12 @@ class JailbrokenManager(BaseAttackManager):
                     response = self.target_model.tokenizer.decode(output_ids, skip_special_tokens=True).strip()
                 else:
                     # OpenAI API 模型，直接调用 generate
-                    response = self.target_model.chat(final_input)
+                    input_message = build_messages(
+                        final_input,
+                        inputs=getattr(example, "inputs", None),
+                        system_prompt=None,
+                    )
+                    response = self.target_model.chat(input_message)
 
                 # is_success = self.evaluator.evaluate(example.query, response)
                 save_data = {'example_idx': example_idx, 'query': example.query, 'final_query': mutated_query, 'response': response}

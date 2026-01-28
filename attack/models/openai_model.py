@@ -22,6 +22,18 @@ class OpenAIModel(Model):
         self.API_LOGPROBS = True
         self.API_TOP_LOGPROBS = 20
 
+    @staticmethod
+    def _is_multimodal_messages(messages):
+        if not isinstance(messages, list):
+            return False
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get("content")
+            if isinstance(content, list):
+                return True
+        return False
+
     def set_system_message(self, system_message: str):
         """
         Sets a system message for the conversation.
@@ -139,14 +151,19 @@ class OpenAIModel(Model):
 
         if isinstance(messages, str):
             messages = [messages]
-        if isinstance(messages[0], dict):
-            if messages[0].get('role') == 'system':
-                self.conversation.set_system_message(messages[0]['content'])
-                messages = messages[1:]
-            messages = [msg['content'] for msg in messages]
+        use_direct_messages = self._is_multimodal_messages(messages)
+        if use_direct_messages:
+            api_messages = messages
+        else:
+            if isinstance(messages[0], dict):
+                if messages[0].get('role') == 'system':
+                    self.conversation.set_system_message(messages[0]['content'])
+                    messages = messages[1:]
+                messages = [msg['content'] for msg in messages]
 
-        for index, message in enumerate(messages):
-            self.conversation.append_message(self.conversation.roles[index % 2], message)
+            for index, message in enumerate(messages):
+                self.conversation.append_message(self.conversation.roles[index % 2], message)
+            api_messages = self.conversation.to_openai_api_messages()
 
         cur = 0
         temp_gen_config = self.generation_config.copy()
@@ -157,10 +174,10 @@ class OpenAIModel(Model):
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
-                    messages=self.conversation.to_openai_api_messages(),
+                    messages=api_messages,
                     **temp_gen_config
                 )
-                logger.debug(f"[Prompt]\n{self.conversation.to_openai_api_messages()}")
+                logger.debug(f"[Prompt]\n{api_messages}")
                 logger.debug(f"[Raw Response]\n{response}")
 
                 choices = getattr(response, "choices", [])
