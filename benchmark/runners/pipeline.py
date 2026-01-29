@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Dict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from benchmark.datasets import DatasetRegistry
 from benchmark.judges import JudgeRegistry
@@ -30,20 +31,84 @@ class BenchmarkPipeline:
         output_rows = []
         progress_every = int(self.config.get("progress_every", 100))
         processed = 0
-        for sample in self.dataset.load():
-            response = self.model.generate(sample.question)
-            judge_result = self.judge.score(sample, response)
-            results.append(judge_result)
-            output_rows.append(self._build_row(sample, response, judge_result))
-            processed += 1
-            if progress_every > 0 and processed % progress_every == 0:
-                print(f"Processed {processed} samples")
+        num_workers = int(self.config.get("num_workers", 1))
+        samples = list(self.dataset.load()) if num_workers > 1 else None
+        dataset_iter = samples if samples is not None else self.dataset.load()
+        progress_bar = None
+        if self.config.get("progress_bar"):
+            try:
+                from tqdm import tqdm
+            except ImportError:
+                tqdm = None
+            if tqdm is not None:
+                total = self.config.get("progress_total")
+                if total is None:
+                    total = len(samples) if samples is not None else self._infer_progress_total()
+                if num_workers > 1:
+                    progress_bar = tqdm(total=total, desc="Evaluating", unit="sample")
+                else:
+                    dataset_iter = tqdm(dataset_iter, total=total, desc="Evaluating", unit="sample")
+        if num_workers > 1:
+            results_by_index = {}
+            rows_by_index = {}
+            def _process(sample: Sample):
+                response = self.model.generate(sample.question)
+                judge_result = self.judge.score(sample, response)
+                return judge_result, self._build_row(sample, response, judge_result)
+
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                future_map = {executor.submit(_process, sample): idx for idx, sample in enumerate(dataset_iter)}
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    judge_result, row = future.result()
+                    results_by_index[idx] = judge_result
+                    rows_by_index[idx] = row
+                    processed += 1
+                    if progress_bar is not None:
+                        progress_bar.update(1)
+                    if progress_every > 0 and processed % progress_every == 0:
+                        print(f"Processed {processed} samples")
+            for idx in sorted(results_by_index):
+                results.append(results_by_index[idx])
+                output_rows.append(rows_by_index[idx])
+            if progress_bar is not None:
+                progress_bar.close()
+        else:
+            for sample in dataset_iter:
+                response = self.model.generate(sample.question)
+                judge_result = self.judge.score(sample, response)
+                results.append(judge_result)
+                output_rows.append(self._build_row(sample, response, judge_result))
+                processed += 1
+                if progress_every > 0 and processed % progress_every == 0:
+                    print(f"Processed {processed} samples")
 
         metric_result = self.metric.compute(results)
         self._write_outputs(output_rows, metric_result)
         if progress_every > 0:
             print(f"Processed {processed} samples (done)")
         return metric_result
+
+    def _infer_progress_total(self):
+        dataset_cfg = self.config.get("dataset", {})
+        dataset_type = dataset_cfg.get("type")
+        path = dataset_cfg.get("path")
+        if not path:
+            return None
+        try:
+            if dataset_type == "csv":
+                import csv
+
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    reader = csv.reader(f)
+                    next(reader, None)
+                    return sum(1 for _ in reader)
+            if dataset_type == "jsonl":
+                with open(path, "r", encoding="utf-8") as f:
+                    return sum(1 for line in f if line.strip())
+        except OSError:
+            return None
+        return None
 
     def _build_row(
         self, sample: Sample, response: ModelResponse, judge_result: JudgeResult

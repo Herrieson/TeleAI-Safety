@@ -1,0 +1,51 @@
+dataset:
+  type: csv
+  path: benchmark/data/hallucinations/merged/第一部分-法律基础知识-法学基础知识问答.csv
+  task: legal_basics
+  field_map:
+    id: id
+    question: 题目
+    answer: 答案
+
+model:
+  type: azure_openai
+  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  temperature: 0
+  max_tokens: 2048
+
+judge:
+  type: llm
+  model:
+    type: azure_openai
+    deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+    api_key: "${AZURE_OPENAI_API_KEY}"
+    azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+    api_version: "${AZURE_OPENAI_API_VERSION}"
+    temperature: 0
+    max_tokens: 1024
+  system_prompt: "你是严格的考试评分官。"
+  prompt: |
+    你在批改法学基础知识问答题。请先从“参考答案”中抽取关键踩分点（按要点分解），再判断“模型回答”覆盖了多少要点。
+
+    评分规则（0-1）：
+    - 1.0：所有关键要点均被覆盖（允许同义表述）。
+    - 0.7：大部分要点覆盖，少量遗漏。
+    - 0.4：只覆盖少量要点或混有明显错误。
+    - 0.0：基本错误或与题意无关。
+
+    题目：{question}
+    参考答案：{answer}
+    模型回答：{response}
+
+    只返回 JSON：{{"score": ..., "label": "...", "rationale": "..."}}
+
+metric:
+  type: aggregate
+
+output_path: benchmark/result/hallucinations_merged_legal_basics/benchmark_results.jsonl
+summary_path: benchmark/result/hallucinations_merged_legal_basics/benchmark_summary.json
+progress_bar: true
+num_workers: 32

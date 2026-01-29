@@ -1,0 +1,47 @@
+dataset:
+  type: csv
+  path: benchmark/data/hallucinations/merged/第二部分-法律场景推理问答.csv
+  task: legal_scenario
+  field_map:
+    id: id
+    question: 题目
+    answer: 答案
+
+model:
+  type: azure_openai
+  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  temperature: 0
+  max_tokens: 2048
+
+judge:
+  type: llm
+  model:
+    type: azure_openai
+    deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+    api_key: "${AZURE_OPENAI_API_KEY}"
+    azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+    api_version: "${AZURE_OPENAI_API_VERSION}"
+    temperature: 0
+    max_tokens: 1024
+  system_prompt: "你是严格的法律判决一致性评审。"
+  prompt: |
+    只判断结论是否一致，忽略推理过程与措辞细节。
+    - 若模型回答的结论与参考答案一致，得 1 分。
+    - 若不一致或无法判断，得 0 分。
+
+    题目：{question}
+    参考答案：{answer}
+    模型回答：{response}
+
+    只返回 JSON：{{"score": 0 或 1, "label": "...", "rationale": "..."}}
+
+metric:
+  type: accuracy
+
+output_path: benchmark/result/hallucinations_merged_scenario/benchmark_results.jsonl
+summary_path: benchmark/result/hallucinations_merged_scenario/benchmark_summary.json
+progress_bar: true
+num_workers: 32
