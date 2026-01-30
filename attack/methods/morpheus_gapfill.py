@@ -354,12 +354,16 @@ class MorpheusGapFillManager(BaseAttackManager):
             else:
                 inputs = getattr(example, "inputs", None)
             result = self.run_single_conversation(attack_goal, inputs=inputs)
-            record = {
-                "example_idx": example_idx + self.config.data_offset,
-                "query": attack_goal,
-                "final_query": result.get("final_query", ""),
-                "response": result.get("final_response", ""),
-            }
+            base_record = dict(example) if example is not None else {}
+            record = dict(base_record)
+            record.update(
+                {
+                    "example_idx": example_idx + self.config.data_offset,
+                    "query": attack_goal,
+                    "final_query": result.get("final_query", ""),
+                    "response": result.get("final_response", ""),
+                }
+            )
             self.save(record)
         logger.info("Morpheus gap-fill attack finished.")
 

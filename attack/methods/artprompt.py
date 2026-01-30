@@ -255,7 +255,8 @@ class ArtPromptManager(ArtPromptInit):
         dataset = AttackDataset(self.config.data_path)
         
         for idx, item in enumerate(tqdm(dataset, desc="ArtPrompt Attacking")):
-            query = item.get("query") or item.get("question") or item.get("content")
+            base_record = dict(item) if item is not None else {}
+            query = base_record.get("query") or base_record.get("question") or base_record.get("content")
             if not query:
                 continue
                 
@@ -266,19 +267,23 @@ class ArtPromptManager(ArtPromptInit):
                 # 使用目标模型处理艺术提示
                 input_message = build_messages(
                     art_prompt,
-                    inputs=item.get("inputs") if hasattr(item, "get") else getattr(item, "inputs", None),
+                    inputs=base_record.get("inputs") if isinstance(base_record, dict) else None,
                     system_prompt=None,
                 )
                 answer = self.target_model.chat(input_message)
             except Exception as e:
                 answer = f"[Error getting response] {str(e)}"
             
-            record = {
-                "index": idx,
-                "query": query,
-                "artprompt": art_prompt,
-                "response": answer
-            }
+            record = dict(base_record)
+            record.update(
+                {
+                    "example_idx": idx,
+                    "query": query,
+                    "final_query": art_prompt,
+                    "artprompt": art_prompt,
+                    "response": answer,
+                }
+            )
             
             results.append(record)
             if f_out:

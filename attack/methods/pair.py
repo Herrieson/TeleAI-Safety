@@ -136,6 +136,19 @@ def normalize_chat_resp(resp):
     return str(resp)
 
 
+def _normalize_input_record(record):
+    if record is None:
+        return {}
+    if isinstance(record, dict):
+        return dict(record)
+    try:
+        return dict(record)
+    except Exception:
+        if hasattr(record, "__dict__"):
+            return dict(record.__dict__)
+        return {}
+
+
 # ------------------------- PAIRInit -------------------------
 class PAIRInit:
     def __init__(self, config: AttackConfig):
@@ -266,7 +279,7 @@ class PAIRManager(BaseAttackManager):
             return s, ""
 
  
-    def single_attack(self, instance: AttackData, example_idx: Optional[int] = None):
+    def single_attack(self, instance: AttackData, example_idx: Optional[int] = None, input_record=None):
       # prepare initial jailbreak_prompt and set attack system message if supported
       instance.jailbreak_prompt = self.attack_seed.format(
             query=instance.query,
@@ -539,14 +552,23 @@ class PAIRManager(BaseAttackManager):
       if final_response is None:
             final_response = "[No valid response generated]"
 
-      # Prepare log record
-      log_record = {
-            "example_idx": example_idx,
-            "query": instance.query,
-            "final_query": final_jailbreak_prompt,
-            "response": final_response,
-            "max_score": max_score
-      }
+      # Prepare log record (input record + added fields)
+      base_record = _normalize_input_record(input_record)
+      if not base_record:
+            base_record = dict(instance._data)
+      if "inputs" not in base_record and instance.inputs:
+            base_record["inputs"] = instance.inputs
+
+      log_record = dict(base_record)
+      log_record.update(
+            {
+                  "example_idx": example_idx,
+                  "query": instance.query,
+                  "final_query": final_jailbreak_prompt,
+                  "response": final_response,
+                  "max_score": max_score,
+            }
+      )
 
       logger.info(f"Final result: query='{instance.query}', response='{final_response}', score={max_score}")
 
@@ -589,7 +611,7 @@ class PAIRManager(BaseAttackManager):
                     else:
                         instance._data[attr_name] = attr_value
                 # run single attack
-                self.single_attack(instance, example_idx)
+                self.single_attack(instance, example_idx, input_record=example)
                 instance.clear()
         except KeyboardInterrupt:
             logger.info("PAIR attack interrupted by user!")
@@ -608,7 +630,7 @@ class PAIRManager(BaseAttackManager):
         else:
             instance._data['target'] = target
 
-        instance = self.single_attack(instance)
+        instance = self.single_attack(instance, example_idx=0, input_record={"query": prompt, "target": target})
         return instance.jailbreak_prompt
 
 

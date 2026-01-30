@@ -222,29 +222,33 @@ class DeepInceptionManager(BaseAttackManager):
         for example_idx, example in enumerate(tqdm(self.attack_dataset, desc="Executing DeepInception attack")):
             try:
                 # Generate attack prompt
-                raw_query = example.query
+                base_record = dict(example)
+                raw_query = base_record.get("query", "")
                 attack_prompt = self.generate_attack_prompt(raw_query)
                 
                 # Get model response based on model type
                 input_message = build_messages(
                     attack_prompt,
-                    inputs=getattr(example, "inputs", None),
+                    inputs=base_record.get("inputs"),
                     system_prompt=getattr(self.config, "system_prompt", None),
                 )
                 response = self.target_model.chat(input_message)
 
                 # Log results
-                result_data = {
-                    'example_idx': example_idx,
-                    'query': raw_query,
-                    'final_query': attack_prompt,
-                    'response': response,
-                    'model_type': self.config.model_type,
-                    'model_name': self.config.target_model_name,
-                    'layer_num': self.config.layer_num,
-                    'character_num': self.config.character_num,
-                    'scene': self.config.scene
-                }
+                result_data = dict(base_record)
+                result_data.update(
+                    {
+                        'example_idx': example_idx,
+                        'query': raw_query,
+                        'final_query': attack_prompt,
+                        'response': response,
+                        'model_type': self.config.model_type,
+                        'model_name': self.config.target_model_name,
+                        'layer_num': self.config.layer_num,
+                        'character_num': self.config.character_num,
+                        'scene': self.config.scene,
+                    }
+                )
                 
                 self.log(result_data, save=True)
                 

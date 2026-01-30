@@ -393,12 +393,13 @@ class DRAManager(BaseAttackManager):
         
         for example_idx, example in enumerate(tqdm(self.attack_dataset, desc="Executing DRA attack")):
             try:
+                base_record = dict(example)
                 # Reset truncation parameters for each example
                 toxic_trunc = self.config.default_toxic_trunc
                 benign_trunc = self.config.default_benign_trunc
                 attack_success = False
                 
-                raw_query = example.query
+                raw_query = base_record.get("query", "")
                 
                 # Iterative attack with adaptive parameters
                 for iteration in range(self.config.iters):
@@ -417,15 +418,18 @@ class DRAManager(BaseAttackManager):
                     response = self.target_model.chat(input_message)
                                
                 # Log results
-                result_data = {
-                    'example_idx': example_idx,
-                    'query': raw_query,
-                    'final_query': attack_prompt,
-                    'response': response,
-                    'model_type': self.config.model_type,
-                    'model_name': self.config.target_model_name,
-                    'iterations_used': iteration + 1
-                }
+                result_data = dict(base_record)
+                result_data.update(
+                    {
+                        'example_idx': example_idx,
+                        'query': raw_query,
+                        'final_query': attack_prompt,
+                        'response': response,
+                        'model_type': self.config.model_type,
+                        'model_name': self.config.target_model_name,
+                        'iterations_used': iteration + 1,
+                    }
+                )
                 
                 self.log(result_data, save=True)
                 

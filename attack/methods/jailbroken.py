@@ -203,6 +203,7 @@ class JailbrokenManager(BaseAttackManager):
 
     def attack(self):
         for example_idx, example in enumerate(tqdm(self.data, desc="Attacking each example")):
+            base_record = dict(example)
             mutated_queries = self.mutator.mutate(example.query)
             for mutated_query in mutated_queries:
                 final_input = self.format_msgs(mutated_query)
@@ -221,7 +222,15 @@ class JailbrokenManager(BaseAttackManager):
                     response = self.target_model.chat(input_message)
 
                 # is_success = self.evaluator.evaluate(example.query, response)
-                save_data = {'example_idx': example_idx, 'query': example.query, 'final_query': mutated_query, 'response': response}
+                save_data = dict(base_record)
+                save_data.update(
+                    {
+                        'example_idx': example_idx,
+                        'query': example.query,
+                        'final_query': mutated_query,
+                        'response': response,
+                    }
+                )
                 self.log(save_data, save=True)
 
     def mutate(self, query):

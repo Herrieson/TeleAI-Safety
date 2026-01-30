@@ -362,8 +362,9 @@ class ReneManager(BaseAttackManager):
             return "[GenerationFailed] No response from model."
         return response
 
-    def _append_result_minimal(self, idx: int, query: str, final_query: str, response: str):
-        rec = {"example_idx": idx, "query": query, "final_query": final_query, "response": response}
+    def _append_result_minimal(self, idx: int, query: str, final_query: str, response: str, base_record: Optional[dict] = None):
+        rec = dict(base_record) if isinstance(base_record, dict) else {}
+        rec.update({"example_idx": idx, "query": query, "final_query": final_query, "response": response})
         res_path = getattr(self.config, "res_save_path", None)
         if res_path:
             try:
@@ -382,8 +383,10 @@ class ReneManager(BaseAttackManager):
         for idx, harm_behavior in enumerate(tqdm(self.data.harmful_behaviors, desc="Rene Attacking")):
             start_time = time.time()
             inputs = None
+            base_record = None
             if isinstance(harm_behavior, dict):
                 inputs = harm_behavior.get("inputs")
+                base_record = dict(harm_behavior)
                 harm_behavior = harm_behavior.get("query", "")
             # 1) mutate prompt
             rewritten = self.mutator.rewrite_prompt(harm_behavior)
@@ -401,7 +404,7 @@ class ReneManager(BaseAttackManager):
             attack_output = self._attack_with_model(nested, inputs=inputs)
 
             # 5) store minimal JSONL
-            self._append_result_minimal(idx, harm_behavior, rewritten, attack_output)
+            self._append_result_minimal(idx, harm_behavior, rewritten, attack_output, base_record=base_record)
 
             # small delay if needed
             if getattr(self.config, "round_sleep", 0):

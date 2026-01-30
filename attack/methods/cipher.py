@@ -69,6 +69,7 @@ class AttackStatus:
     current_idx: int = 0
     current_example: str = ""
     current_inputs: Dict[str, Any] = field(default_factory=dict)
+    current_record: Dict[str, Any] = field(default_factory=dict)
     attack_prompts: List[List[Dict]] = field(default_factory=list)
     attack_methods: List[str] = field(default_factory=list)
     attack_responses: List[str] = field(default_factory=list)
@@ -96,6 +97,7 @@ class CipherSelector:
         cur = data.population[status.current_idx]
         status.current_example = cur.get('query', '')
         status.current_inputs = cur.get('inputs') or {}
+        status.current_record = dict(cur)
         status.current_idx += 1
 
 
@@ -251,11 +253,12 @@ class CipherEvaluator:
                           (prompt_msgs[1].get("content", "") if len(prompt_msgs) > 1 and isinstance(prompt_msgs[1], dict) else "")
 
             result_message = {
+                **dict(status.current_record),
                 "example_idx": status.current_idx - 1,  # -1 because select_example incremented
                 "query": status.current_example,
                 "final_query": final_query,
                 "response": decoded_response,
-                "method": method
+                "method": method,
             }
 
             # optional judge
@@ -299,13 +302,8 @@ class CipherManager(BaseAttackManager):
         return cls(config)
 
     def update_res(self, result: Dict):
-        """Write minimal JSONL with fields: example_idx, query, final_query, response"""
-        rec = {
-            "example_idx": result.get("example_idx"),
-            "query": result.get("query"),
-            "final_query": result.get("final_query"),
-            "response": result.get("response"),
-        }
+        """Write full JSONL record (input fields + added fields)."""
+        rec = dict(result)
         res_path = getattr(self.config, "res_save_path", None)
         if res_path:
             try:

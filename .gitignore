@@ -76,3 +76,6 @@ logs/
 .cache/
 .huggingface/
 huggingface/
+
+# Datasets
+data/
