@@ -6,7 +6,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
 
 import yaml
@@ -73,6 +74,30 @@ def _run_one(method_path, cfg_path, log_path, cwd):
     return proc.returncode
 
 
+def _count_lines(path: Path) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            count += chunk.count(b"\n")
+    return count
+
+
+def _print_progress(total, completed, tmp_results, tmp_logs, start_ts):
+    elapsed = int(time.time() - start_ts)
+    shards = []
+    for i, log_path in enumerate(tmp_logs):
+        if tmp_results:
+            line_count = _count_lines(tmp_results[i])
+            shards.append(f"shard{i}:{line_count} lines")
+        else:
+            size_kb = log_path.stat().st_size // 1024 if log_path.exists() else 0
+            shards.append(f"shard{i}:{size_kb}KB log")
+    shard_summary = " | ".join(shards)
+    print(f"[progress] done {completed}/{total} | {elapsed}s | {shard_summary}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run attack method in parallel by sharding data.")
     parser.add_argument("--method", required=True, help="Path to attack method script (e.g., methods/pair.py).")
@@ -80,6 +105,7 @@ def main():
     parser.add_argument("--shards", type=int, required=True, help="Number of data shards.")
     parser.add_argument("--max-workers", type=int, default=None, help="Max parallel workers (default: shards).")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary shard files.")
+    parser.add_argument("--progress-interval", type=int, default=15, help="Progress report interval in seconds (0 to disable).")
     args = parser.parse_args()
 
     root = Path.cwd()
@@ -115,7 +141,8 @@ def main():
 
         shard_cfg = dict(cfg)
         shard_cfg["data_path"] = str(shard_data)
-        shard_cfg["data_offset"] = 0
+        if "data_offset" in cfg:
+            shard_cfg["data_offset"] = 0
 
         if res_save_path:
             shard_res = tmp_root / f"res_shard_{i}{res_suffix}"
@@ -136,11 +163,23 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = []
         for cfg_path, log_path in zip(tmp_configs, tmp_logs):
-            futures.append(
-                pool.submit(_run_one, method_path, cfg_path, log_path, root)
-            )
-        for fut in as_completed(futures):
-            rc = fut.result()
+            futures.append(pool.submit(_run_one, method_path, cfg_path, log_path, root))
+
+        pending = set(futures)
+        results = {}
+        start_ts = time.time()
+        progress_interval = max(0, int(args.progress_interval))
+        while pending:
+            if progress_interval == 0:
+                done, pending = wait(pending)
+            else:
+                done, pending = wait(pending, timeout=progress_interval)
+            for fut in done:
+                results[fut] = fut.result()
+            if pending and progress_interval > 0:
+                _print_progress(shards, len(results), tmp_results, tmp_logs, start_ts)
+
+        for rc in results.values():
             if rc != 0:
                 failures.append(rc)
 
