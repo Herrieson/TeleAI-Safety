@@ -333,7 +333,10 @@ class DRAManager(BaseAttackManager):
     def _initialize_components(self) -> None:
         """Initialize all components needed for the attack."""
         # Load attack dataset
-        attack_dataset = AttackDataset(self.config.attack_data_path)
+        attack_dataset = AttackDataset(
+            self.config.attack_data_path,
+            image_root_in=getattr(self.config, "image_root_in", None),
+        )
         self.attack_dataset = attack_dataset
         
         # Initialize detoxify loader

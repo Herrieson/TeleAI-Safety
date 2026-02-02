@@ -7,10 +7,33 @@ from torch.utils.data import DataLoader
 import numpy as np
 from datasets import load_dataset
 
+def _inject_image_root_in_record(record, image_root_in):
+    if not image_root_in:
+        return record
+    if isinstance(record, dict):
+        inputs = record.get("inputs")
+        if inputs is None:
+            if record.get("image_rel"):
+                record["inputs"] = {"image_rel": record.get("image_rel"), "image_root_in": image_root_in}
+            return record
+        if isinstance(inputs, dict) and "image_root_in" not in inputs:
+            inputs["image_root_in"] = image_root_in
+        return record
+    if hasattr(record, "inputs"):
+        inputs = getattr(record, "inputs", None)
+        if inputs is None:
+            if hasattr(record, "image_rel"):
+                setattr(record, "inputs", {"image_rel": getattr(record, "image_rel"), "image_root_in": image_root_in})
+            return record
+        if isinstance(inputs, dict) and "image_root_in" not in inputs:
+            inputs["image_root_in"] = image_root_in
+    return record
+
+
 class AttackDataset:
-    def __init__(self, path, subset_slice=None):
+    def __init__(self, path, subset_slice=None, image_root_in=None):
         if isinstance(path, list):
-            self.data = path
+            self.data = [_inject_image_root_in_record(d, image_root_in) for d in path]
         elif os.path.exists(path):
             # logger.warning('You chose to load a dataset from a local file. If it is not a json/jsonl file, please make sure you correctly set \'local_file_type\' parameter when you instantiate the AttackDataset.')
 
@@ -26,7 +49,7 @@ class AttackDataset:
             elif path.endswith('.parquet'):
                 _data = pd.read_parquet(path).to_dict('records')
 
-            self.data = [Example(**d) for d in _data]
+            self.data = [Example(**_inject_image_root_in_record(d, image_root_in)) for d in _data]
 
         elif 'thu-coai/AISafetyLab_Datasets' in path:
             file_name = path.split('/')[-1]
@@ -38,7 +61,7 @@ class AttackDataset:
                 split = 'test'
 
             _data = load_dataset("thu-coai/AISafetyLab_Datasets", data_name, split=split)
-            self.data = [Example(**d) for d in _data]
+            self.data = [Example(**_inject_image_root_in_record(d, image_root_in)) for d in _data]
 
         else:
             logger.error('Please make sure the path is a valid local file path or a huggingface dataset path. For local files, we support the following types: json, jsonl, csv, xlsx, parquet. For huggingface datasets, we now only support the datasets in the "thu-coai/AISafetyLab_Datasets" repository. Please open an issue if you want to use other datasets.')
@@ -84,8 +107,8 @@ class AugmentDataLoader(DataLoader):
                 batch["target"] = targets
             yield batch
 
-def get_dataloader(data_pth, batch_size, shuffle, augment_target):
-    dataset = AttackDataset(path=data_pth)
+def get_dataloader(data_pth, batch_size, shuffle, augment_target, image_root_in=None):
+    dataset = AttackDataset(path=data_pth, image_root_in=image_root_in)
     dataloader = AugmentDataLoader(
         dataset, augment_target=augment_target, shuffle=shuffle, batch_size=batch_size
     )

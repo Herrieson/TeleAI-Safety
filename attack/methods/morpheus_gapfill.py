@@ -271,7 +271,11 @@ class MorpheusGapFillManager(BaseAttackManager):
             raise ValueError("attacker_model, target_model, and judge_model must be configured.")
 
         subset_slice = slice(config.data_offset, None)
-        self.attack_dataset = AttackDataset(config.data_path, subset_slice)
+        self.attack_dataset = AttackDataset(
+            config.data_path,
+            subset_slice,
+            image_root_in=getattr(config, "image_root_in", None),
+        )
         self.completed_queries = load_completed_queries(config.res_save_path)
 
     def _get_attack_goal(self, example: Any) -> Optional[str]:

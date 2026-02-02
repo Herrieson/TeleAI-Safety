@@ -10,7 +10,7 @@ from typing import Optional, List, Dict
 from mimetypes import guess_type
 
 from utils import BaseAttackManager, ConfigManager, parse_arguments
-from utils.message_builder import build_messages
+from utils.message_builder import build_messages, normalize_images
 from dataset import AttackDataset
 from models import load_model
 
@@ -626,31 +626,11 @@ class MMLManager(BaseAttackManager):
     def _normalize_inputs_images(self, inputs: Optional[dict]) -> dict:
         if not isinstance(inputs, dict):
             return {}
-        images = inputs.get("images")
-        if images is None:
-            images = inputs.get("image")
-        if images is None:
-            images = inputs.get("image_url")
-        if images is None:
+        images = normalize_images(inputs)
+        if not images:
             return inputs
-
-        if isinstance(images, str):
-            images = [images]
-
-        norm_images = []
-        for img in images:
-            if not img:
-                continue
-            if isinstance(img, str) and (img.startswith("http://") or img.startswith("https://") or img.startswith("data:")):
-                norm_images.append(img)
-                continue
-            if isinstance(img, str) and os.path.exists(img):
-                norm_images.append(local_image_to_data_url(img))
-            else:
-                norm_images.append(img)
-
         new_inputs = dict(inputs)
-        new_inputs["images"] = norm_images
+        new_inputs["images"] = images
         return new_inputs
 
     def _query_target(self, prompt: str, inputs: Optional[dict] = None, image_path: Optional[str] = None) -> str:
@@ -764,7 +744,11 @@ class MMLManager(BaseAttackManager):
         self._attack_attack_dataset()
 
     def _attack_attack_dataset(self):
-        dataset = AttackDataset(self.config.data_path, subset_slice=self.config.data_offset)
+        dataset = AttackDataset(
+            self.config.data_path,
+            subset_slice=self.config.data_offset,
+            image_root_in=getattr(self.config, "image_root_in", None),
+        )
         result_save_path = self.config.save_dir
         os.makedirs(result_save_path, exist_ok=True)
         result_save_file = os.path.join(result_save_path, "result.jsonl")

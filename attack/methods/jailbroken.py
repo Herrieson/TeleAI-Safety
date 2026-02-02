@@ -76,7 +76,7 @@ class JailbrokenEvaluator:
 
 class JailbrokenInit:
     def __init__(self, config: AttackConfig) -> None:
-        attack_dataset = AttackDataset(config.data_path)
+        attack_dataset = AttackDataset(config.data_path, image_root_in=getattr(config, "image_root_in", None))
         self.data  = AttackData(attack_dataset = attack_dataset)
         
         print("Loading TargetModel...")

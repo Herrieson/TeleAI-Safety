@@ -16,6 +16,7 @@ from models import load_model
 class AttackConfig:
     data_path: str
     data_offset: int = 0
+    image_root_in: Optional[str] = None
 
     target_model_type: str = "openai"
     target_model_name: str = "gpt-4o-mini"
@@ -55,7 +56,11 @@ class MinimalExampleManager(BaseAttackManager):
         )
 
     def attack(self):
-        dataset = AttackDataset(self.config.data_path, subset_slice=self.config.data_offset)
+        dataset = AttackDataset(
+            self.config.data_path,
+            subset_slice=self.config.data_offset,
+            image_root_in=getattr(self.config, "image_root_in", None),
+        )
         for example_idx, example in enumerate(tqdm(dataset, desc="MinimalExample Attacking")):
             base_record = dict(example)
             query = base_record.get("query") or base_record.get("prompt") or base_record.get("question")

@@ -187,7 +187,11 @@ class PAIRInit:
 
 
         subset_slice = slice(config.data_offset, None)
-        self.attack_dataset = AttackDataset(config.data_path, subset_slice)
+        self.attack_dataset = AttackDataset(
+            config.data_path,
+            subset_slice,
+            image_root_in=getattr(config, "image_root_in", None),
+        )
 
 
 # ------------------------- PAIRMutator -------------------------

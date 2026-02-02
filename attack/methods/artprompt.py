@@ -252,7 +252,7 @@ class ArtPromptManager(ArtPromptInit):
     def attack(self):
         results = []
         f_out = open(self.config.res_save_path, "w", encoding="utf-8") if self.config.res_save_path else None
-        dataset = AttackDataset(self.config.data_path)
+        dataset = AttackDataset(self.config.data_path, image_root_in=getattr(self.config, "image_root_in", None))
         
         for idx, item in enumerate(tqdm(dataset, desc="ArtPrompt Attacking")):
             base_record = dict(item) if item is not None else {}

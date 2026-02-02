@@ -210,7 +210,7 @@ class ReneInit:
         if getattr(self.config, "prompt", None):
             self.data.harmful_behaviors = [{"query": self.config.prompt, "inputs": {}}]
         else:
-            ds = AttackDataset(self.config.data_path)
+            ds = AttackDataset(self.config.data_path, image_root_in=getattr(self.config, "image_root_in", None))
             items = []
             for example in ds:
                 query = example.get("query", "")
