@@ -62,7 +62,8 @@ def _resolve_path(path_str, root: Path):
     return root / path
 
 
-def _run_one(method_path, cfg_path, log_path, cwd):
+def _run_one(shard_idx, method_path, cfg_path, log_path, cwd):
+    start = time.monotonic()
     with log_path.open("w", encoding="utf-8") as logf:
         proc = subprocess.run(
             [sys.executable, str(method_path), "--config_path", str(cfg_path)],
@@ -71,7 +72,9 @@ def _run_one(method_path, cfg_path, log_path, cwd):
             stderr=subprocess.STDOUT,
             check=False,
         )
-    return proc.returncode
+        elapsed = time.monotonic() - start
+        logf.write(f"\n[parallel_attack] shard={shard_idx} elapsed_sec={elapsed:.3f}\n")
+    return shard_idx, proc.returncode, elapsed
 
 
 def _count_lines(path: Path) -> int:
@@ -160,10 +163,11 @@ def main():
 
     max_workers = args.max_workers or shards
     failures = []
+    shard_timings = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = []
-        for cfg_path, log_path in zip(tmp_configs, tmp_logs):
-            futures.append(pool.submit(_run_one, method_path, cfg_path, log_path, root))
+        for idx, (cfg_path, log_path) in enumerate(zip(tmp_configs, tmp_logs)):
+            futures.append(pool.submit(_run_one, idx, method_path, cfg_path, log_path, root))
 
         pending = set(futures)
         results = {}
@@ -179,7 +183,8 @@ def main():
             if pending and progress_interval > 0:
                 _print_progress(shards, len(results), tmp_results, tmp_logs, start_ts)
 
-        for rc in results.values():
+        for shard_idx, rc, elapsed in results.values():
+            shard_timings[shard_idx] = elapsed
             if rc != 0:
                 failures.append(rc)
 
@@ -195,6 +200,39 @@ def main():
                     continue
                 with shard_res.open("r", encoding="utf-8") as in_f:
                     shutil.copyfileobj(in_f, out_f)
+
+    if shard_timings:
+        total_elapsed = sum(shard_timings.values())
+        per_shard = [
+            {"shard": idx, "elapsed_sec": shard_timings[idx]}
+            for idx in sorted(shard_timings.keys())
+        ]
+        timing_summary = {
+            "method": method_path.name,
+            "shards": shards,
+            "total_elapsed_sec": total_elapsed,
+            "avg_elapsed_sec": total_elapsed / shards if shards else 0,
+            "min_elapsed_sec": min(shard_timings.values()),
+            "max_elapsed_sec": max(shard_timings.values()),
+            "per_shard": per_shard,
+        }
+        print(
+            "[timing] method={method} shards={shards} total={total:.3f}s "
+            "avg={avg:.3f}s min={min:.3f}s max={max:.3f}s".format(
+                method=timing_summary["method"],
+                shards=timing_summary["shards"],
+                total=timing_summary["total_elapsed_sec"],
+                avg=timing_summary["avg_elapsed_sec"],
+                min=timing_summary["min_elapsed_sec"],
+                max=timing_summary["max_elapsed_sec"],
+            ),
+            flush=True,
+        )
+
+        timing_dir = res_save_path.parent if res_save_path else root
+        timing_path = timing_dir / f"{method_path.stem}.timing.json"
+        with timing_path.open("w", encoding="utf-8") as f:
+            json.dump(timing_summary, f, ensure_ascii=False, indent=2)
 
     if args.keep_temp:
         print(f"Kept temporary files in: {tmp_root}")

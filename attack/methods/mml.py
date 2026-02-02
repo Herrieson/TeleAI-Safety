@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append(os.getcwd())
 import json
 import random
 import time
@@ -15,7 +17,6 @@ from dataset import AttackDataset
 from models import load_model
 
 import openai
-import anthropic
 from PIL import Image, ImageDraw, ImageFont
 
 # ==========================================
@@ -465,7 +466,7 @@ def _render_text_on_image(img, text):
 
 
 def _encode_title(item, image_format):
-    title = item.get("original_prompt", "")
+    title = item.get("query") or item.get("prompt") or item.get("original_prompt") or ""
     if image_format == "images_base64":
         return base64.b64encode(title.encode("utf-8")).decode("utf-8")
     if image_format == "images_wr":
@@ -591,6 +592,7 @@ class MMLManager(BaseAttackManager):
             )
 
     def _query_claude(self, image_path: str, prompt: str) -> str:
+        import anthropic
         client = anthropic.Anthropic(api_key=self.config.api_key)
         image_media_type, image_data = load_image_claude(image_path)
         while True:
@@ -662,6 +664,12 @@ class MMLManager(BaseAttackManager):
             if os.path.exists(rel_path):
                 return rel_path
         if isinstance(inputs, dict):
+            image_rel = inputs.get("image_rel")
+            if image_rel:
+                image_root_in = inputs.get("image_root_in") or self.config.image_root_in
+                rel_path = os.path.join(image_root_in, image_rel) if image_root_in else image_rel
+                if os.path.exists(rel_path):
+                    return rel_path
             images = inputs.get("images") or inputs.get("image") or inputs.get("image_url")
             if isinstance(images, str) and os.path.exists(images):
                 return images
@@ -717,10 +725,11 @@ class MMLManager(BaseAttackManager):
         return 0
 
     def _build_question(self, item: Dict, image_format: str, dataset: str) -> str:
+        base_text = item.get("query") or item.get("prompt") or item.get("original_prompt") or ""
         if "images_wr" in image_format:
-            return wr_game_prompt.format(item["replace_map"], random_shuffle_sentence(item["original_prompt"]))
+            return wr_game_prompt.format(item["replace_map"], random_shuffle_sentence(base_text))
         if image_format in dataformat2prompt:
-            return dataformat2prompt[image_format].format(random_shuffle_sentence(item["original_prompt"]))
+            return dataformat2prompt[image_format].format(random_shuffle_sentence(base_text))
         if image_format == 'images' and dataset == 'hades':
             return item["hades_prompt"]
         if image_format == 'images_qr':
@@ -744,14 +753,20 @@ class MMLManager(BaseAttackManager):
         self._attack_attack_dataset()
 
     def _attack_attack_dataset(self):
+        data_offset = getattr(self.config, "data_offset", 0) or 0
+        subset_slice = slice(data_offset, None) if data_offset > 0 else None
         dataset = AttackDataset(
             self.config.data_path,
-            subset_slice=self.config.data_offset,
+            subset_slice=subset_slice,
             image_root_in=getattr(self.config, "image_root_in", None),
         )
-        result_save_path = self.config.save_dir
-        os.makedirs(result_save_path, exist_ok=True)
-        result_save_file = os.path.join(result_save_path, "result.jsonl")
+        result_save_file = getattr(self.config, "res_save_path", None)
+        if result_save_file:
+            os.makedirs(os.path.dirname(result_save_file), exist_ok=True)
+        else:
+            result_save_path = self.config.save_dir
+            os.makedirs(result_save_path, exist_ok=True)
+            result_save_file = os.path.join(result_save_path, "result.jsonl")
         processed_count = 0
         if os.path.exists(result_save_file):
             with open(result_save_file, "r", encoding="utf-8") as f:
@@ -764,14 +779,14 @@ class MMLManager(BaseAttackManager):
                 continue
 
             item = example.__dict__
-            original_prompt = item.get("original_prompt") or item.get("query") or item.get("prompt") or ""
+            original_prompt = item.get("query") or item.get("prompt") or item.get("original_prompt") or ""
 
-            if item.get("query"):
+            if self.config.image_format in dataformat2prompt:
+                question = self._build_question(item, self.config.image_format, self.config.dataset)
+            elif item.get("query"):
                 question = item["query"]
             elif item.get("prompt"):
                 question = item["prompt"]
-            elif item.get("original_prompt") and self.config.image_format in dataformat2prompt:
-                question = self._build_question(item, self.config.image_format, self.config.dataset)
             else:
                 question = original_prompt
 

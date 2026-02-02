@@ -6,6 +6,8 @@ class BaseAttackManager:
     def __init__(self, res_save_path=None, delete_existing_res=False):
         self.res_save_path = res_save_path
         logger.info(f"Results will be saved to '{res_save_path}'")
+        if res_save_path is None:
+            return
         res_dir = os.path.dirname(res_save_path)
         if os.path.exists(res_save_path):
             if os.path.isfile(res_save_path) and delete_existing_res:
