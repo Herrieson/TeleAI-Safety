@@ -1,3 +1,5 @@
+import os
+
 from .openai_model import OpenAIModel
 from .azure_openai_model import AzureOpenAIModel
 from .grok_model import GrokModel
@@ -33,10 +35,12 @@ def load_model(model_type=None, model_name=None, model_path=None, config=None):
                 # generation_config=config.generation_config
             )
         else:
+            api_version = getattr(config, "azure_api_version", None) or os.getenv("AZURE_OPENAI_API_VERSION") or "2024-12-01-preview"
             return AzureOpenAIModel(
                 model_name=model_name,       # 如 o1-preview / gpt-35-turbo
                 base_url=config.azure_url,           # https://xxx.openai.azure.com/
                 api_key=config.azure_key,
+                api_version=api_version,
                 # generation_config=config.generation_config
             )
     # ✅ OpenAI 模型处理（API Key 模式）

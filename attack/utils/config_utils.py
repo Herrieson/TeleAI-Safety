@@ -1,7 +1,8 @@
 # ----------------------- Configuration Management -----------------------
 from loguru import logger
-import yaml
 import argparse
+import os
+import yaml
 
 
 def parse_arguments():
@@ -21,10 +22,20 @@ class ConfigManager:
         self.config = self.load_config(config_path)
         self.validate_config()
 
+    def _expand_env_vars(self, obj):
+        if isinstance(obj, dict):
+            return {k: self._expand_env_vars(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._expand_env_vars(v) for v in obj]
+        if isinstance(obj, str):
+            return os.path.expandvars(obj)
+        return obj
+
     def load_config(self, config_path):
         try:
             with open(config_path, "r") as f:
-                return yaml.safe_load(f)
+                data = yaml.safe_load(f)
+            return self._expand_env_vars(data)
         except Exception as e:
             logger.error(f"Error loading configuration file: {e}")
             raise e
