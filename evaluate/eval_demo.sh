@@ -9,7 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
 ASR_ROOT="${ROOT_DIR}/metrics/asr"
-RESULTS_DIR="${ROOT_DIR}/results"
+RESULTS_DIR="${ROOT_DIR}/../data/attack_results"
 OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/asr"
 
 # 默认 scorer 列表（按需扩展）
@@ -33,7 +33,7 @@ declare -A CONFIG_MAP=(
   ["MultiAPIScorer"]="${ASR_ROOT}/config/multi_api_scorer.yaml"
 )
 
-mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" ! -path "${RESULTS_DIR}/ternary/*" | sort)
+mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" | sort)
 if [[ ${#result_files[@]} -eq 0 ]]; then
   echo "No jsonl files found in ${RESULTS_DIR}" >&2
   exit 1
@@ -115,7 +115,7 @@ echo "Summarizing reports in ${OUTPUT_ROOT}"
 uv run python report/summarize_reports.py
 
 # 标注三分类标签
-TERNARY_DIR="${RESULTS_DIR}/ternary"
+TERNARY_DIR="${RESULTS_DIR}"
 if [[ -d "${TERNARY_DIR}" ]]; then
   if [[ -z "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
     echo "AZURE_OPENAI_DEPLOYMENT is required for ternary labeling." >&2
