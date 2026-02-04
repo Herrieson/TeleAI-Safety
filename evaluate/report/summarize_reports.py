@@ -7,8 +7,9 @@ from typing import Dict, List, Optional, Tuple
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 REPORT_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr")
-# 评测输入数据放在项目根的 results/ 下
+# 评测输入数据通常放在项目根的 results/ 下，也可能在 ../data/attack_results/
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 LONG_CSV = os.path.join(REPORT_DIR, "summary_long.csv")
 WIDE_CSV = os.path.join(REPORT_DIR, "summary_wide.csv")
 MARKDOWN = os.path.join(REPORT_DIR, "summary.md")
@@ -24,6 +25,8 @@ def parse_report(path: str) -> Optional[Dict[str, str]]:
         "success": r"^Attack success samples:\s*(\d+)$",
         "asr": r"^Attack Success Rate \(ASR\):\s*([0-9.]+)",
         "avg_asr": r"^Average scorer ASR:\s*([0-9.eE+-]+)",
+        "safe_total": r"^Safe samples \(label=0\):\s*(\d+)$",
+        "frr": r"^False Refusal Rate \(FRR\):\s*([0-9.]+)",
     }
     values: Dict[str, str] = {}
     with open(path, "r", encoding="utf-8") as f:
@@ -41,6 +44,8 @@ def parse_report(path: str) -> Optional[Dict[str, str]]:
     # Some reports omit skipped; default to 0
     values.setdefault("skipped", "0")
     values.setdefault("avg_asr", "")
+    values.setdefault("safe_total", "")
+    values.setdefault("frr", "")
     values["report_path"] = path
     return values
 
@@ -53,10 +58,13 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
     attack_group: first path segment for coarse grouping.
     """
     abs_input = os.path.abspath(input_file)
-    results_abs = os.path.abspath(RESULTS_DIR)
-    if abs_input.startswith(results_abs):
-        rel = os.path.relpath(abs_input, results_abs)
-    else:
+    candidate_roots = [os.path.abspath(RESULTS_DIR), ALT_RESULTS_DIR]
+    rel = None
+    for root in candidate_roots:
+        if abs_input.startswith(root + os.sep):
+            rel = os.path.relpath(abs_input, root)
+            break
+    if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):
         rel_no_ext = rel[:-6]
@@ -86,6 +94,8 @@ def collect_reports() -> List[Dict[str, str]]:
                 "skipped_samples": parsed["skipped"],
                 "attack_success_samples": parsed["success"],
                 "asr": parsed["asr"],
+                "safe_samples": parsed.get("safe_total", ""),
+                "frr": parsed.get("frr", ""),
                 "avg_asr": parsed.get("avg_asr", ""),
                 "input_file": parsed["input_file"],
                 "report_path": os.path.relpath(path, REPORT_DIR),
@@ -115,6 +125,8 @@ def write_long_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
         "skipped_samples",
         "attack_success_samples",
         "asr",
+        "safe_samples",
+        "frr",
         "avg_asr_all_scorers",
         "input_file",
         "report_path",
@@ -132,17 +144,20 @@ def write_long_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
 def write_wide_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> None:
     # Pivot attack_run -> scorer -> asr
     pivot: Dict[str, Dict[str, str]] = defaultdict(dict)
+    pivot_frr: Dict[str, Dict[str, str]] = defaultdict(dict)
     attack_groups: Dict[str, str] = {}
     scorers = set()
     for row in rows:
         run = row["attack_run"]
         pivot[run][row["scorer"]] = row["asr"]
+        pivot_frr[run][row["scorer"]] = row.get("frr", "")
         attack_groups[run] = row["attack_group"]
         scorers.add(row["scorer"])
     scorer_list = sorted(scorers)
     fieldnames = (
         ["attack_run", "attack_group", "ASR_avg_all_scorers"]
         + [f"ASR_{s}" for s in scorer_list]
+        + [f"FRR_{s}" for s in scorer_list]
     )
     with open(WIDE_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -155,6 +170,7 @@ def write_wide_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
             }
             for s in scorer_list:
                 row[f"ASR_{s}"] = pivot[run].get(s, "")
+                row[f"FRR_{s}"] = pivot_frr[run].get(s, "")
             writer.writerow(row)
 
 
@@ -168,12 +184,12 @@ def write_markdown(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
         lines.append("")
         lines.append(f"Average ASR across scorers: {run_avg_asr.get(attack_run, '')}")
         lines.append("")
-        lines.append("| Scorer | ASR | Total | Success | Skipped | Report |")
-        lines.append("| --- | --- | --- | --- | --- | --- |")
+        lines.append("| Scorer | ASR | FRR | Total | Success | Skipped | Safe | Report |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
         for row in sorted(grouped[attack_run], key=lambda r: r["scorer"]):
             lines.append(
-                f"| {row['scorer']} | {row['asr']} | {row['total_samples']} | "
-                f"{row['attack_success_samples']} | {row['skipped_samples']} | {row['report_path']} |"
+                f"| {row['scorer']} | {row['asr']} | {row.get('frr', '')} | {row['total_samples']} | "
+                f"{row['attack_success_samples']} | {row['skipped_samples']} | {row.get('safe_samples', '')} | {row['report_path']} |"
             )
         lines.append("")
     with open(MARKDOWN, "w", encoding="utf-8") as f:

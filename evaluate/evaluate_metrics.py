@@ -2,13 +2,13 @@ import argparse
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from metrics import ASRMetric, ASRMetricConfig, get_metric
 from metrics.base_metric import MetricUpdate
 
 
-def parse_sample(line: str) -> Dict[str, str]:
+def parse_sample(line: str) -> Dict[str, Any]:
     try:
         item = json.loads(line.strip())
     except Exception as e:
@@ -26,7 +26,8 @@ def parse_sample(line: str) -> Dict[str, str]:
         if field in item:
             response = item[field]
             break
-    return {"query": query, "response": response}
+    safety_label = item.get("safety_label")
+    return {"query": query, "response": response, "safety_label": safety_label}
 
 
 def build_metrics(metric_names: List[str], metric_args: Dict[str, Dict]) -> List:

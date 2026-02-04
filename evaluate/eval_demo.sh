@@ -99,6 +99,10 @@ uv run python evaluate_metrics.py \
   --json_path="${filtered_result_files[0]}" \
   --output_path="${MDS_OUTPUT_PATH}"
 
+# 计算平均各个 scorer 的平均 ASR 并总结到 csv，markdown 文件中
+echo "Summarizing reports in ${OUTPUT_ROOT}"
+uv run python report/summarize_reports.py
+
 # 生成 Kappa 一致性报告（基于 summary_wide.csv）
 KAPPA_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/kappa"
 mkdir -p "${KAPPA_OUTPUT_DIR}"
@@ -109,10 +113,6 @@ uv run python evaluate_metrics.py \
   --metric_args="${KAPPA_ARGS}" \
   --json_path="${filtered_result_files[0]}" \
   --output_path="${KAPPA_OUTPUT_PATH}"
-
-# 计算平均各个 scorer 的平均 ASR 并总结到 csv，markdown 文件中
-echo "Summarizing reports in ${OUTPUT_ROOT}"
-uv run python report/summarize_reports.py
 
 # 标注三分类标签
 TERNARY_DIR="${RESULTS_DIR}"
@@ -127,26 +127,6 @@ if [[ -d "${TERNARY_DIR}" ]]; then
   else
     echo "Running ternary labeling in ${TERNARY_DIR}"
     for json_path in "${ternary_files[@]}"; do
-      if uv run python - "${json_path}" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        obj = json.loads(line)
-        has_q = "question_label" in obj
-        has_r = "response_label" in obj
-        sys.exit(0 if has_q and has_r else 1)
-sys.exit(1)
-PY
-      then
-        echo "Skip ternary labeling (already labeled): ${json_path}"
-        continue
-      fi
       uv run python metrics/ternary_metrics.py \
         --input "${json_path}" \
         --judge-deployment "${AZURE_OPENAI_DEPLOYMENT}"

@@ -14,6 +14,7 @@ DEFAULT_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar
 DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png")
 DEFAULT_METRIC_PANEL = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias_wsl_cm.png")
 DEFAULT_MDS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_mds.png")
+DEFAULT_FRR_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models_frr.png")
 DEFAULT_RADAR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_radar")
 DEFAULT_RADAR_FILE = "summary_radar_all.png"
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
@@ -93,6 +94,7 @@ def read_summary_long(path: str) -> Tuple[Dict[Tuple[str, str], Dict[str, object
                 key,
                 {
                     "asr_vals": [],
+                    "frr_vals": [],
                     "scorers": set(),
                     "total_samples": set(),
                     "skipped_samples": set(),
@@ -105,6 +107,15 @@ def read_summary_long(path: str) -> Tuple[Dict[Tuple[str, str], Dict[str, object
             except (TypeError, ValueError):
                 continue
             group["asr_vals"].append(asr_val)
+
+            frr_raw = row.get("frr", "")
+            if frr_raw:
+                try:
+                    frr_val = float(frr_raw)
+                except (TypeError, ValueError):
+                    frr_val = None
+                if frr_val is not None:
+                    group["frr_vals"].append(frr_val)
 
             scorer = row.get("scorer")
             if scorer:
@@ -125,9 +136,11 @@ def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[
     rows: List[Dict[str, str]] = []
     for (model, attack), data in groups.items():
         asr_vals: List[float] = data["asr_vals"]
+        frr_vals: List[float] = data["frr_vals"]
         if not asr_vals:
             continue
         avg_asr = sum(asr_vals) / len(asr_vals)
+        avg_frr = sum(frr_vals) / len(frr_vals) if frr_vals else None
         scorers: Set[str] = data["scorers"]
         total_samples: Set[int] = data["total_samples"]
 
@@ -143,6 +156,7 @@ def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[
                 "model": model,
                 "attack": attack,
                 "avg_asr": f"{avg_asr:.4f}",
+                "avg_frr": f"{avg_frr:.4f}" if avg_frr is not None else "",
                 "num_scorers": str(len(scorers)) if scorers else "",
                 "total_samples": total_str,
             }
@@ -151,21 +165,31 @@ def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[
 
 
 def format_model_summary(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    model_vals: Dict[str, List[float]] = {}
+    model_asr_vals: Dict[str, List[float]] = {}
+    model_frr_vals: Dict[str, List[float]] = {}
     for row in rows:
         try:
             asr_val = float(row["avg_asr"])
         except (TypeError, ValueError):
             continue
-        model_vals.setdefault(row["model"], []).append(asr_val)
+        model_asr_vals.setdefault(row["model"], []).append(asr_val)
+        try:
+            frr_val = float(row.get("avg_frr", ""))
+        except (TypeError, ValueError):
+            frr_val = None
+        if frr_val is not None:
+            model_frr_vals.setdefault(row["model"], []).append(frr_val)
 
     summary = []
-    for model, vals in sorted(model_vals.items()):
+    for model, vals in sorted(model_asr_vals.items()):
         avg_asr = sum(vals) / len(vals)
+        frr_vals = model_frr_vals.get(model, [])
+        avg_frr = sum(frr_vals) / len(frr_vals) if frr_vals else None
         summary.append(
             {
                 "model": model,
                 "avg_asr": f"{avg_asr:.4f}",
+                "avg_frr": f"{avg_frr:.4f}" if avg_frr is not None else "",
                 "attacks": str(len(vals)),
             }
         )
@@ -224,6 +248,7 @@ def generate_plots(
     heatmap_path: str,
     model_bar_path: str,
     attack_bar_path: str,
+    frr_model_bar_path: str,
 ) -> List[str]:
     try:
         import matplotlib.pyplot as plt
@@ -329,6 +354,39 @@ def generate_plots(
         fig.savefig(model_bar_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
         created.append(model_bar_path)
+
+    frr_model_vals = []
+    for row in model_summary:
+        try:
+            frr_model_vals.append((row["model"], float(row["avg_frr"])))
+        except (TypeError, ValueError):
+            continue
+    frr_model_vals.sort(key=lambda item: item[1])
+    if frr_model_vals:
+        labels = [item[0] for item in frr_model_vals]
+        values = [item[1] for item in frr_model_vals]
+        fig_w = max(8.0, len(labels) * 1.0)
+        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
+        setup_axis(ax, "Model Average FRR (Ascending)", "Avg FRR")
+        colors = plt.cm.cividis(np.linspace(0.3, 0.8, len(values)))
+        bars = ax.bar(labels, values, color=colors, alpha=0.9, width=0.6)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height + 0.01,
+                f"{height:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color="#555555",
+            )
+        fig.tight_layout()
+        os.makedirs(os.path.dirname(frr_model_bar_path), exist_ok=True)
+        fig.savefig(frr_model_bar_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        created.append(frr_model_bar_path)
 
     attack_summary = compute_attack_summary(rows)
     attack_summary.sort(key=lambda item: item[1], reverse=True)
@@ -567,6 +625,7 @@ def _normalize_metric(
 
 def generate_radar_plots(
     model_asr: Dict[str, float],
+    model_frr: Dict[str, float],
     model_mds: Dict[str, float],
     model_bias: Dict[str, float],
     model_wsl: Dict[str, float],
@@ -589,6 +648,7 @@ def generate_radar_plots(
 
     metrics = [
         ("ASR", model_asr, False),
+        ("FRR", model_frr, False),
         ("MDS", model_mds, True),
         ("Bias", model_bias, False),
         ("WSL", model_wsl, False),
@@ -601,6 +661,7 @@ def generate_radar_plots(
 
     models = sorted(
         set(model_asr)
+        & set(model_frr)
         & set(model_mds)
         & set(model_bias)
         & set(model_wsl)
@@ -721,15 +782,15 @@ def write_markdown(
         lines.extend(
             [
                 "",
-                "## Model Summary (Average ASR across attacks)",
+                "## Model Summary (Average ASR/FRR across attacks)",
                 "",
-                "| Model | Avg ASR | Attacks Covered |",
-                "| --- | --- | --- |",
+                "| Model | Avg ASR | Avg FRR | Attacks Covered |",
+                "| --- | --- | --- | --- |",
             ]
         )
         for row in model_summary:
             lines.append(
-                "| {model} | {avg_asr} | {attacks} |".format(
+                "| {model} | {avg_asr} | {avg_frr} | {attacks} |".format(
                     **row
                 )
             )
@@ -741,6 +802,14 @@ def write_markdown(
         if model_bar_path:
             rel_model_bar = os.path.relpath(model_bar_path, os.path.dirname(output_path))
             lines.extend(["", f"![Model Average ASR Bar]({rel_model_bar})"])
+
+        frr_model_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_FRR_MODEL_BAR)),
+            None,
+        )
+        if frr_model_bar_path:
+            rel_frr_bar = os.path.relpath(frr_model_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Average FRR Bar]({rel_frr_bar})"])
 
         attack_bar_path = next(
             (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_ATTACK_BAR)),
@@ -966,6 +1035,7 @@ def main() -> None:
     parser.add_argument("--attack-bar", default=DEFAULT_ATTACK_BAR, help="Attack bar chart path")
     parser.add_argument("--metric-panel", default=DEFAULT_METRIC_PANEL, help="Bias/WSL/CM panel chart path")
     parser.add_argument("--mds-bar", default=DEFAULT_MDS_BAR, help="MDS bar chart path")
+    parser.add_argument("--frr-bar", default=DEFAULT_FRR_MODEL_BAR, help="FRR model bar chart path")
     parser.add_argument("--radar-dir", default=DEFAULT_RADAR_DIR, help="Radar chart output directory")
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     args = parser.parse_args()
@@ -985,7 +1055,7 @@ def main() -> None:
     mds_rows = read_mds_reports(mds_dir)
     bias_vals = read_metric_reports(
         os.path.abspath(args.bias_dir),
-        r"^Mean\(response_label - question_label\):\s*([0-9.\-]+)",
+        r"^Mean\(response_label - (?:question_label|response_strategy_label)\):\s*([0-9.\-]+)",
     )
     wsl_vals = read_metric_reports(
         os.path.abspath(args.wsl_dir),
@@ -1005,6 +1075,7 @@ def main() -> None:
             os.path.abspath(args.heatmap),
             os.path.abspath(args.model_bar),
             os.path.abspath(args.attack_bar),
+            os.path.abspath(args.frr_bar),
         )
         plot_paths.extend(
             generate_metric_panel_from_summary(
@@ -1040,8 +1111,14 @@ def main() -> None:
             for row in metric_summary
             if row.get("cm")
         }
+        model_frr = {
+            row["model"]: float(row["avg_frr"])
+            for row in model_summary
+            if row.get("avg_frr")
+        }
         radar_paths = generate_radar_plots(
             model_asr,
+            model_frr,
             model_mds,
             model_bias,
             model_wsl,

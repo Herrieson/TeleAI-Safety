@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 RESULTS_ROOT = os.path.join(PROJECT_ROOT, "results", "ternary")
+ALT_RESULTS_ROOT = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 REPORT_ROOT = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 
 
@@ -19,16 +20,29 @@ def parse_args() -> argparse.Namespace:
 
 def derive_output_path(input_path: str) -> str:
     abs_input = os.path.abspath(input_path)
-    results_root = os.path.abspath(RESULTS_ROOT)
-    if abs_input.startswith(results_root + os.sep):
-        rel = os.path.relpath(abs_input, results_root)
-    else:
+    results_roots = [os.path.abspath(RESULTS_ROOT), ALT_RESULTS_ROOT]
+    rel = None
+    for root in results_roots:
+        if abs_input.startswith(root + os.sep):
+            rel = os.path.relpath(abs_input, root)
+            break
+    if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):
         rel = rel[:-6]
     else:
         rel = os.path.splitext(rel)[0]
     return os.path.join(REPORT_ROOT, rel + ".txt")
+
+
+def get_question_label(obj: dict) -> Optional[int]:
+    value = obj.get("question_label")
+    if isinstance(value, int):
+        return value
+    value = obj.get("response_strategy_label")
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def read_jsonl(path: str, lambda_penalty: float) -> Tuple[int, int, float]:
@@ -45,9 +59,9 @@ def read_jsonl(path: str, lambda_penalty: float) -> Tuple[int, int, float]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            y = obj.get("question_label")
+            y = get_question_label(obj)
             y_hat = obj.get("response_label")
-            if not isinstance(y, int) or not isinstance(y_hat, int):
+            if y is None or not isinstance(y_hat, int):
                 continue
             if y < 0 or y_hat < 0:
                 continue

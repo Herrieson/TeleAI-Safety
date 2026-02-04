@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 RESULTS_ROOT = os.path.join(PROJECT_ROOT, "results", "ternary")
+ALT_RESULTS_ROOT = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 REPORT_ROOT = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 
 
@@ -18,16 +19,29 @@ def parse_args() -> argparse.Namespace:
 
 def derive_output_path(input_path: str) -> str:
     abs_input = os.path.abspath(input_path)
-    results_root = os.path.abspath(RESULTS_ROOT)
-    if abs_input.startswith(results_root + os.sep):
-        rel = os.path.relpath(abs_input, results_root)
-    else:
+    results_roots = [os.path.abspath(RESULTS_ROOT), ALT_RESULTS_ROOT]
+    rel = None
+    for root in results_roots:
+        if abs_input.startswith(root + os.sep):
+            rel = os.path.relpath(abs_input, root)
+            break
+    if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):
         rel = rel[:-6]
     else:
         rel = os.path.splitext(rel)[0]
     return os.path.join(REPORT_ROOT, rel + ".txt")
+
+
+def get_question_label(obj: dict) -> Optional[int]:
+    value = obj.get("response_strategy_label")
+    if isinstance(value, int):
+        return value
+    value = obj.get("question_label")
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def read_jsonl(path: str) -> Tuple[int, int, float]:
@@ -44,9 +58,9 @@ def read_jsonl(path: str) -> Tuple[int, int, float]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            q_label = obj.get("question_label")
+            q_label = get_question_label(obj)
             r_label = obj.get("response_label")
-            if not isinstance(q_label, int) or not isinstance(r_label, int):
+            if q_label is None or not isinstance(r_label, int):
                 continue
             if q_label < 0 or r_label < 0:
                 continue
@@ -65,9 +79,9 @@ def write_report(output_path: str, input_path: str, mean_bias: Optional[float], 
         f"Used samples: {used}",
     ]
     if mean_bias is None:
-        lines.append("Mean(response_label - question_label): N/A")
+        lines.append("Mean(response_label - response_strategy_label): N/A")
     else:
-        lines.append(f"Mean(response_label - question_label): {mean_bias:.6f}")
+        lines.append(f"Mean(response_label - response_strategy_label): {mean_bias:.6f}")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 

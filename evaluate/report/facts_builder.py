@@ -24,6 +24,7 @@ DEFAULT_PLOTS = {
     "model_bar": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png"),
     "attack_bar": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png"),
     "metric_bar": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_metrics.png"),
+    "frr_bar": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models_frr.png"),
 }
 
 KNOWN_ATTACKS = [
@@ -105,16 +106,21 @@ def average(values: Iterable[float]) -> Optional[float]:
     return sum(vals) / len(vals)
 
 
-def compute_model_attack_matrix(rows: List[Dict[str, str]]) -> Dict[str, Dict[str, float]]:
+def compute_model_attack_matrix(
+    rows: List[Dict[str, str]],
+    value_field: str = "asr",
+) -> Dict[str, Dict[str, float]]:
     buckets: Dict[Tuple[str, str], List[float]] = {}
     for row in rows:
-        raw = row.get("asr")
+        raw = row.get(value_field)
+        if raw in (None, ""):
+            continue
         try:
-            asr_val = float(raw)
+            value = float(raw)
         except (TypeError, ValueError):
             continue
         key = (row["model"], row["attack"])
-        buckets.setdefault(key, []).append(asr_val)
+        buckets.setdefault(key, []).append(value)
 
     matrix: Dict[str, Dict[str, float]] = {}
     for (model, attack), vals in buckets.items():
@@ -122,36 +128,56 @@ def compute_model_attack_matrix(rows: List[Dict[str, str]]) -> Dict[str, Dict[st
     return matrix
 
 
-def compute_model_summary(matrix: Dict[str, Dict[str, float]]) -> List[Dict[str, object]]:
+def compute_model_summary(
+    matrix: Dict[str, Dict[str, float]],
+    frr_matrix: Optional[Dict[str, Dict[str, float]]] = None,
+) -> List[Dict[str, object]]:
     summary: List[Dict[str, object]] = []
     for model, attacks in matrix.items():
         vals = list(attacks.values())
         if not vals:
             continue
         avg_asr = sum(vals) / len(vals)
+        avg_frr = None
+        if frr_matrix:
+            frr_vals = list(frr_matrix.get(model, {}).values())
+            if frr_vals:
+                avg_frr = sum(frr_vals) / len(frr_vals)
         summary.append(
             {
                 "model": model,
                 "avg_asr": avg_asr,
+                "avg_frr": avg_frr,
                 "attacks_covered": len(vals),
             }
         )
     return sorted(summary, key=lambda r: r["model"])
 
 
-def compute_attack_summary(matrix: Dict[str, Dict[str, float]]) -> List[Dict[str, object]]:
+def compute_attack_summary(
+    matrix: Dict[str, Dict[str, float]],
+    frr_matrix: Optional[Dict[str, Dict[str, float]]] = None,
+) -> List[Dict[str, object]]:
     buckets: Dict[str, List[float]] = {}
     for attacks in matrix.values():
         for attack, val in attacks.items():
             buckets.setdefault(attack, []).append(val)
+    frr_buckets: Dict[str, List[float]] = {}
+    if frr_matrix:
+        for attacks in frr_matrix.values():
+            for attack, val in attacks.items():
+                frr_buckets.setdefault(attack, []).append(val)
     summary: List[Dict[str, object]] = []
     for attack, vals in buckets.items():
         if not vals:
             continue
+        frr_vals = frr_buckets.get(attack, [])
+        avg_frr = sum(frr_vals) / len(frr_vals) if frr_vals else None
         summary.append(
             {
                 "attack": attack,
                 "avg_asr": sum(vals) / len(vals),
+                "avg_frr": avg_frr,
             }
         )
     return sorted(summary, key=lambda r: r["attack"])
@@ -304,11 +330,23 @@ def build_facts_md(facts: Dict[str, object], output_path: str) -> None:
 
     model_summary = facts.get("model_summary") or []
     if model_summary:
-        lines.extend(["## Model Summary", "", "| Model | Avg ASR | Attacks Covered |", "| --- | --- | --- |"])
+        lines.extend(
+            [
+                "## Model Summary",
+                "",
+                "| Model | Avg ASR | Avg FRR | Attacks Covered |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
         for row in model_summary:
+            avg_frr = row.get("avg_frr")
+            avg_frr_str = f"{avg_frr:.4f}" if isinstance(avg_frr, (int, float)) else ""
             lines.append(
-                "| {model} | {avg_asr:.4f} | {attacks_covered} |".format(
-                    **row
+                "| {model} | {avg_asr:.4f} | {avg_frr} | {attacks_covered} |".format(
+                    model=row["model"],
+                    avg_asr=row["avg_asr"],
+                    avg_frr=avg_frr_str,
+                    attacks_covered=row["attacks_covered"],
                 )
             )
         lines.append("")
@@ -360,12 +398,16 @@ def main() -> None:
 
     rows, unparsed = read_summary_long(args.summary_long)
     matrix = compute_model_attack_matrix(rows)
-    model_summary = compute_model_summary(matrix)
-    attack_summary = compute_attack_summary(matrix)
+    frr_matrix = compute_model_attack_matrix(rows, value_field="frr")
+    model_summary = compute_model_summary(matrix, frr_matrix)
+    attack_summary = compute_attack_summary(matrix, frr_matrix)
     model_stats = compute_model_stats(matrix)
 
     mds_summary = read_mds_reports(args.mds_dir)
-    bias_vals = read_metric_reports(args.bias_dir, r"^Mean\(response_label - question_label\):\s*([0-9.\-]+)")
+    bias_vals = read_metric_reports(
+        args.bias_dir,
+        r"^Mean\(response_label - (?:question_label|response_strategy_label)\):\s*([0-9.\-]+)",
+    )
     wsl_vals = read_metric_reports(args.wsl_dir, r"^Mean weighted loss:\s*([0-9.\-]+)")
     cm_vals = read_metric_reports(args.cm_dir, r"^Mean cost:\s*([0-9.\-]+)")
 
