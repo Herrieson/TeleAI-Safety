@@ -15,6 +15,7 @@ DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_ba
 DEFAULT_METRIC_PANEL = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias_wsl_cm.png")
 DEFAULT_MDS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_mds.png")
 DEFAULT_FRR_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models_frr.png")
+DEFAULT_FRR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
 DEFAULT_RADAR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_radar")
 DEFAULT_RADAR_FILE = "summary_radar_all.png"
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
@@ -75,7 +76,10 @@ def parse_attack_run(attack_run: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def read_summary_long(path: str) -> Tuple[Dict[Tuple[str, str], Dict[str, object]], List[str]]:
+def read_summary_long(
+    path: str,
+    frr_by_run: Optional[Dict[str, float]] = None,
+) -> Tuple[Dict[Tuple[str, str], Dict[str, object]], List[str]]:
     groups: Dict[Tuple[str, str], Dict[str, object]] = {}
     unparsed: List[str] = []
 
@@ -108,14 +112,17 @@ def read_summary_long(path: str) -> Tuple[Dict[Tuple[str, str], Dict[str, object
                 continue
             group["asr_vals"].append(asr_val)
 
+            frr_val = None
             frr_raw = row.get("frr", "")
             if frr_raw:
                 try:
                     frr_val = float(frr_raw)
                 except (TypeError, ValueError):
                     frr_val = None
-                if frr_val is not None:
-                    group["frr_vals"].append(frr_val)
+            elif frr_by_run:
+                frr_val = frr_by_run.get(attack_run)
+            if frr_val is not None:
+                group["frr_vals"].append(frr_val)
 
             scorer = row.get("scorer")
             if scorer:
@@ -130,6 +137,42 @@ def read_summary_long(path: str) -> Tuple[Dict[Tuple[str, str], Dict[str, object
                 group["skipped_samples"].add(int(skipped))
 
     return groups, unparsed
+
+
+def read_frr_reports(frr_dir: str) -> Dict[str, float]:
+    if not os.path.isdir(frr_dir):
+        return {}
+
+    def parse_report(path: str) -> Optional[Tuple[str, float]]:
+        input_file = None
+        frr_val = None
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("Input file:"):
+                    input_file = line.split(":", 1)[1].strip()
+                elif line.startswith("False Refusal Rate (FRR):"):
+                    try:
+                        frr_val = float(line.split(":", 1)[1].strip())
+                    except ValueError:
+                        frr_val = None
+        if input_file and frr_val is not None:
+            attack_run, _ = derive_attack_run(input_file)
+            return attack_run, frr_val
+        return None
+
+    frr_by_run: Dict[str, float] = {}
+    for root, _, files in os.walk(frr_dir):
+        for fname in files:
+            if not fname.endswith(".txt"):
+                continue
+            path = os.path.join(root, fname)
+            parsed = parse_report(path)
+            if not parsed:
+                continue
+            attack_run, frr_val = parsed
+            frr_by_run[attack_run] = frr_val
+    return frr_by_run
 
 
 def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[Dict[str, str]]:
@@ -1036,6 +1079,7 @@ def main() -> None:
     parser.add_argument("--metric-panel", default=DEFAULT_METRIC_PANEL, help="Bias/WSL/CM panel chart path")
     parser.add_argument("--mds-bar", default=DEFAULT_MDS_BAR, help="MDS bar chart path")
     parser.add_argument("--frr-bar", default=DEFAULT_FRR_MODEL_BAR, help="FRR model bar chart path")
+    parser.add_argument("--frr-dir", default=DEFAULT_FRR_DIR, help="Directory with FRR reports")
     parser.add_argument("--radar-dir", default=DEFAULT_RADAR_DIR, help="Radar chart output directory")
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     args = parser.parse_args()
@@ -1044,7 +1088,8 @@ def main() -> None:
     if not os.path.isfile(input_path):
         raise SystemExit(f"summary_long.csv not found: {input_path}")
 
-    groups, unparsed = read_summary_long(input_path)
+    frr_by_run = read_frr_reports(os.path.abspath(args.frr_dir))
+    groups, unparsed = read_summary_long(input_path, frr_by_run)
     rows = format_group_rows(groups)
     if not rows:
         raise SystemExit("No valid rows found in summary_long.csv")

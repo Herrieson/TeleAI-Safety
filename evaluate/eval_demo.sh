@@ -11,6 +11,7 @@ cd "${ROOT_DIR}"
 ASR_ROOT="${ROOT_DIR}/metrics/asr"
 RESULTS_DIR="${ROOT_DIR}/../data/attack_results"
 OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/asr"
+FRR_OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/frr"
 
 # 默认 scorer 列表（按需扩展）
 DEFAULT_SCORERS=("PatternScorer" "PrefixMatchScorer" "ClassficationScorer" "GPTScorer" "GPT5Scorer" "DSV3Scorer" "DSR1Scorer" "MultiAPIScorer")
@@ -52,6 +53,9 @@ if [[ ${#filtered_result_files[@]} -eq 0 ]]; then
 fi
 
 mkdir -p "${OUTPUT_ROOT}"
+mkdir -p "${FRR_OUTPUT_ROOT}"
+
+FRR_MODE="${EVAL_FRR_MODE:-llm}"
 
 for json_path in "${filtered_result_files[@]}"; do
   # 相对 results 的子路径（去掉扩展）
@@ -86,6 +90,16 @@ for json_path in "${filtered_result_files[@]}"; do
       --json_path="${json_path}" \
       --output_path="${out_path}"
   done
+
+  frr_out_dir="${FRR_OUTPUT_ROOT}/${rel_no_ext}"
+  mkdir -p "${frr_out_dir}"
+  frr_out_path="${frr_out_dir}/${base_name}.txt"
+  frr_args_json=$(printf '{"FRR":{"mode":"%s"}}' "${FRR_MODE}")
+  uv run python evaluate_metrics.py \
+    --metrics="FRR" \
+    --metric_args="${frr_args_json}" \
+    --json_path="${json_path}" \
+    --output_path="${frr_out_path}"
 done
 
 # 生成所有模型的 MDS 汇总报告（基于 ASR evaluation_report 目录）

@@ -16,6 +16,7 @@ DEFAULT_KAPPA_CSV = os.path.join(PROJECT_ROOT, "evaluation_report", "kappa", "ka
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 DEFAULT_CM_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "cm")
+DEFAULT_FRR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "facts.json")
 DEFAULT_FACTS_MD = os.path.join(PROJECT_ROOT, "evaluation_report", "facts.md")
 
@@ -38,6 +39,9 @@ KNOWN_ATTACKS = [
     "dra",
     "dan",
 ]
+
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 
 
 def normalize_attack_name(name: str) -> str:
@@ -79,6 +83,25 @@ def parse_attack_run(attack_run: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def derive_attack_run(input_file: str) -> Tuple[str, str]:
+    abs_input = os.path.abspath(input_file)
+    candidate_roots = [os.path.abspath(RESULTS_DIR), ALT_RESULTS_DIR]
+    rel = None
+    for root in candidate_roots:
+        if abs_input.startswith(root + os.sep):
+            rel = os.path.relpath(abs_input, root)
+            break
+    if rel is None:
+        rel = os.path.basename(abs_input)
+    if rel.endswith(".jsonl"):
+        rel_no_ext = rel[:-6]
+    else:
+        rel_no_ext = os.path.splitext(rel)[0]
+    parts = rel_no_ext.split(os.sep)
+    attack_group = parts[0] if parts else rel_no_ext
+    return rel_no_ext, attack_group
+
+
 def read_summary_long(path: str) -> Tuple[List[Dict[str, str]], List[str]]:
     rows: List[Dict[str, str]] = []
     unparsed: List[str] = []
@@ -97,6 +120,38 @@ def read_summary_long(path: str) -> Tuple[List[Dict[str, str]], List[str]]:
             row_out["attack"] = attack
             rows.append(row_out)
     return rows, unparsed
+
+
+def read_frr_reports(report_dir: str) -> Dict[str, Dict[str, float]]:
+    if not os.path.isdir(report_dir):
+        return {}
+    frr_matrix: Dict[str, Dict[str, float]] = {}
+    for root, _, files in os.walk(report_dir):
+        for fname in files:
+            if not fname.endswith(".txt"):
+                continue
+            path = os.path.join(root, fname)
+            input_file = None
+            frr_val = None
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("Input file:"):
+                        input_file = line.split(":", 1)[1].strip()
+                    elif line.startswith("False Refusal Rate (FRR):"):
+                        try:
+                            frr_val = float(line.split(":", 1)[1].strip())
+                        except ValueError:
+                            frr_val = None
+            if not input_file or frr_val is None:
+                continue
+            attack_run, _ = derive_attack_run(input_file)
+            parsed = parse_attack_run(attack_run)
+            if not parsed:
+                continue
+            model, attack = parsed
+            frr_matrix.setdefault(model, {})[attack] = frr_val
+    return frr_matrix
 
 
 def average(values: Iterable[float]) -> Optional[float]:
@@ -385,6 +440,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bias-dir", default=DEFAULT_BIAS_DIR, help="Directory with Bias reports")
     parser.add_argument("--wsl-dir", default=DEFAULT_WSL_DIR, help="Directory with WSL reports")
     parser.add_argument("--cm-dir", default=DEFAULT_CM_DIR, help="Directory with CM reports")
+    parser.add_argument("--frr-dir", default=DEFAULT_FRR_DIR, help="Directory with FRR reports")
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help="Output facts.json path")
     parser.add_argument("--facts-md", default=DEFAULT_FACTS_MD, help="Output facts.md path")
     return parser.parse_args()
@@ -398,7 +454,7 @@ def main() -> None:
 
     rows, unparsed = read_summary_long(args.summary_long)
     matrix = compute_model_attack_matrix(rows)
-    frr_matrix = compute_model_attack_matrix(rows, value_field="frr")
+    frr_matrix = read_frr_reports(args.frr_dir)
     model_summary = compute_model_summary(matrix, frr_matrix)
     attack_summary = compute_attack_summary(matrix, frr_matrix)
     model_stats = compute_model_stats(matrix)

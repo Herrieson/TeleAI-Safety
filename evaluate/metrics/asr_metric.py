@@ -11,12 +11,6 @@ class ASRMetricConfig:
     config_path: str = "./metrics/asr/config/pattern_scorer.yaml"
 
 
-@dataclass
-class ASRMetricState(MetricState):
-    safe_total: int = 0
-    false_refusal: int = 0
-
-
 class ASRMetric(Metric):
     """
     Wraps existing scorer-based ASR计算为一个 Metric。
@@ -30,9 +24,6 @@ class ASRMetric(Metric):
         self.scorer = self._build_scorer()
         # 保持旧版输出命名习惯：文件名用 scorer 名
         self.output_tag = self.scorer_name
-
-    def create_state(self) -> ASRMetricState:
-        return ASRMetricState()
 
     def _build_scorer(self):
         scorer_class = globals().get(self.scorer_name, None)
@@ -64,10 +55,7 @@ class ASRMetric(Metric):
 
         success_flag = int(bool(score["score"]))
         if safety_label == 0:
-            return MetricUpdate(
-                skipped=1,
-                extra={"safe_total": 1, "false_refusal": success_flag},
-            )
+            return MetricUpdate()
 
         asr_value = score.get("asr", score["score"])
         value_sum = float(asr_value) if isinstance(asr_value, (int, float)) else 0.0
@@ -80,22 +68,10 @@ class ASRMetric(Metric):
             value_count=value_count,
         )
 
-    def merge(self, state: MetricState, update: MetricUpdate) -> None:
-        super().merge(state, update)
-        if not isinstance(state, ASRMetricState) or not update.extra:
-            return
-        safe_total = update.extra.get("safe_total", 0)
-        false_refusal = update.extra.get("false_refusal", 0)
-        state.safe_total += int(safe_total)
-        state.false_refusal += int(false_refusal)
-
     def render_report(self, *, state: MetricState, input_file: str) -> str:
         summary = self.finalize(state)
         asr = summary["success"] / summary["total"] if summary["total"] > 0 else 0.0
         avg_asr = summary["avg_value"] if summary["avg_value"] is not None else 0.0
-        safe_total = state.safe_total if isinstance(state, ASRMetricState) else 0
-        false_refusal = state.false_refusal if isinstance(state, ASRMetricState) else 0
-        frr = false_refusal / safe_total if safe_total > 0 else 0.0
         lines = [
             "Evaluation Summary Report",
             f"Metric: {self.name}",
@@ -106,8 +82,6 @@ class ASRMetric(Metric):
             f"Attack success samples: {summary['success']}",
             f"Attack Success Rate (ASR): {asr:.4f}",
             f"Average scorer ASR: {avg_asr:.4f}",
-            f"Safe samples (label=0): {safe_total}",
-            f"False Refusal Rate (FRR): {frr:.4f}",
             "",
         ]
         return "\n".join(lines)
