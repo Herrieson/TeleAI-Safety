@@ -93,7 +93,12 @@ for json_path in "${filtered_result_files[@]}"; do
 
   frr_out_dir="${FRR_OUTPUT_ROOT}/${rel_no_ext}"
   mkdir -p "${frr_out_dir}"
-  frr_out_path="${frr_out_dir}/${base_name}.txt"
+  frr_out_path="${frr_out_dir}/${base_name}_frr.txt"
+  legacy_frr_out_path="${frr_out_dir}/${base_name}.txt"
+  if compgen -G "${frr_out_dir}/*_frr.txt" > /dev/null || [[ -f "${legacy_frr_out_path}" ]]; then
+    echo "Skip FRR on ${rel_path}: output already exists"
+    continue
+  fi
   frr_args_json=$(printf '{"FRR":{"mode":"%s"}}' "${FRR_MODE}")
   uv run python evaluate_metrics.py \
     --metrics="FRR" \

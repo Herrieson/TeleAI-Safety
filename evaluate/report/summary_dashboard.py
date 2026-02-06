@@ -6,6 +6,8 @@ from typing import Dict, List, Optional, Set, Tuple
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 DEFAULT_INPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "summary_long.csv")
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_overview.md")
 DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
@@ -74,6 +76,25 @@ def parse_attack_run(attack_run: str) -> Optional[Tuple[str, str]]:
     if attack_raw and model_raw:
         return model_raw, attack_raw
     return None
+
+
+def derive_attack_run(input_file: str) -> Tuple[str, str]:
+    abs_input = os.path.abspath(input_file)
+    candidate_roots = [os.path.abspath(RESULTS_DIR), ALT_RESULTS_DIR]
+    rel = None
+    for root in candidate_roots:
+        if abs_input.startswith(root + os.sep):
+            rel = os.path.relpath(abs_input, root)
+            break
+    if rel is None:
+        rel = os.path.basename(abs_input)
+    if rel.endswith(".jsonl"):
+        rel_no_ext = rel[:-6]
+    else:
+        rel_no_ext = os.path.splitext(rel)[0]
+    parts = rel_no_ext.split(os.sep)
+    attack_group = parts[0] if parts else rel_no_ext
+    return rel_no_ext, attack_group
 
 
 def read_summary_long(
