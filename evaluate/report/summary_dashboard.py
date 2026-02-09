@@ -20,6 +20,12 @@ DEFAULT_FRR_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary
 DEFAULT_FRR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
 DEFAULT_RADAR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_radar")
 DEFAULT_RADAR_FILE = "summary_radar_all.png"
+DEFAULT_TIERED_DASHBOARD = os.path.join(
+    PROJECT_ROOT, "evaluation_report", "summary_tiered_dashboard.png"
+)
+DEFAULT_EXEC_SUMMARY = os.path.join(
+    PROJECT_ROOT, "evaluation_report", "summary_exec_overview.png"
+)
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 DEFAULT_CM_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "cm")
@@ -667,26 +673,6 @@ def _sanitize_filename(name: str) -> str:
     return cleaned or "model"
 
 
-def _normalize_metric(
-    values: Dict[str, float],
-    higher_is_better: bool,
-) -> Dict[str, float]:
-    if not values:
-        return {}
-    min_val = min(values.values())
-    max_val = max(values.values())
-    if max_val == min_val:
-        return {model: 1.0 for model in values}
-    normalized = {}
-    for model, val in values.items():
-        if higher_is_better:
-            norm = (val - min_val) / (max_val - min_val)
-        else:
-            norm = (max_val - val) / (max_val - min_val)
-        normalized[model] = max(0.0, min(1.0, norm))
-    return normalized
-
-
 def generate_radar_plots(
     model_asr: Dict[str, float],
     model_frr: Dict[str, float],
@@ -715,24 +701,28 @@ def generate_radar_plots(
         ("FRR", model_frr, False),
         ("MDS", model_mds, True),
         ("Bias", model_bias, False),
-        ("WSL", model_wsl, False),
-        ("CM", model_cm, False),
+        ("WSL", model_wsl, True),
+        ("CM", model_cm, True),
     ]
 
-    normalized_maps = {}
-    for label, values, higher_is_better in metrics:
-        normalized_maps[label] = _normalize_metric(values, higher_is_better)
-
-    models = sorted(
-        set(model_asr)
-        & set(model_frr)
-        & set(model_mds)
-        & set(model_bias)
-        & set(model_wsl)
-        & set(model_cm)
-    )
+    models = sorted(set.intersection(*[set(values) for _, values, _ in metrics]))
     if not models:
         return []
+
+    normalized_data: Dict[str, List[float]] = {model: [] for model in models}
+    for _, values, higher_is_better in metrics:
+        metric_vals = [values[model] for model in models]
+        min_val = min(metric_vals)
+        max_val = max(metric_vals)
+        range_val = max_val - min_val
+        if range_val == 0:
+            norm_vals = [1.0] * len(metric_vals)
+        else:
+            norm_vals = [(val - min_val) / range_val for val in metric_vals]
+        if not higher_is_better:
+            norm_vals = [1.0 - val for val in norm_vals]
+        for idx, model in enumerate(models):
+            normalized_data[model].append(norm_vals[idx])
 
     labels = [label for label, _, _ in metrics]
     num_axes = len(labels)
@@ -741,62 +731,392 @@ def generate_radar_plots(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(8.0, 7.2), subplot_kw={"polar": True})
-    fig.patch.set_facecolor("#fbfbfb")
-    ax.set_facecolor("#fcfcfc")
+    fig, ax = plt.subplots(figsize=(9.0, 8.0), subplot_kw={"polar": True})
+    fig.patch.set_facecolor("#fafafa")
+    ax.set_facecolor("#fafafa")
+    ax.spines["polar"].set_color("#e0e0e0")
     ax.set_theta_offset(np.pi / 2)
     ax.set_theta_direction(-1)
-    ax.set_ylim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.05)
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=10, fontweight="bold")
+    ax.set_xticklabels(labels, fontsize=11, fontweight="bold", color="#333333")
     ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], fontsize=8, color="#888888")
-    ax.grid(color="#dddddd", linestyle="--", linewidth=0.7)
-    ax.spines["polar"].set_color("#dddddd")
+    ax.set_yticklabels(["", "", "", ""], fontsize=8, color="#888888")
+    ax.yaxis.grid(True, color="#cccccc", linestyle="--", linewidth=0.8, alpha=0.7)
+    ax.xaxis.grid(True, color="#cccccc", linestyle="-", linewidth=0.8, alpha=0.5)
 
-    cmap = plt.get_cmap("tab20")
-    fill_alpha = 0.06 if len(models) > 8 else 0.18
-    line_alpha = 0.85 if len(models) > 8 else 0.95
+    try:
+        import seaborn as sns
 
-    scored_models = []
-    for model in models:
-        values = [normalized_maps[label].get(model, 0.0) for label, _, _ in metrics]
-        avg_score = sum(values) / len(values) if values else 0.0
-        scored_models.append((model, values, avg_score))
-    scored_models.sort(key=lambda item: item[2], reverse=True)
+        palette = sns.color_palette("deep", len(models))
+    except ImportError:
+        palette = plt.cm.tab10(np.linspace(0, 1, len(models)))
 
-    line_styles = ["-", "--", "-.", ":"]
-    for idx, (model, values, _) in enumerate(scored_models):
-        values = values + values[:1]
-        color = cmap(idx % cmap.N)
+    scored_models = sorted(
+        models,
+        key=lambda model: sum(normalized_data[model]),
+        reverse=True,
+    )
+
+    for idx, model in enumerate(scored_models):
+        values = normalized_data[model] + normalized_data[model][:1]
+        color = palette[idx]
         ax.plot(
             angles,
             values,
             color=color,
-            linewidth=2.0,
-            alpha=line_alpha,
+            linewidth=2,
             marker="o",
-            markersize=3.5,
-            linestyle=line_styles[idx % len(line_styles)],
+            markersize=4,
+            linestyle="solid",
+            alpha=0.9,
             label=model,
         )
-        ax.fill(angles, values, color=color, alpha=fill_alpha)
+        ax.fill(angles, values, color=color, alpha=0.15)
 
-    ax.set_title("Model Metrics Radar (Normalized)", fontsize=12, fontweight="bold", pad=18)
+    ax.set_title(
+        "Model Safety & Capability Radar (Normalized)\nOutward = Better Performance",
+        fontsize=13,
+        fontweight="bold",
+        pad=18,
+        color="#222222",
+    )
     ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.02),
-        frameon=False,
+        loc="upper right",
+        bbox_to_anchor=(1.3, 1.1),
+        frameon=True,
+        edgecolor="#cccccc",
         fontsize=8,
-        title="Models",
+        title="Models (Sorted by Score)",
         title_fontsize=9,
     )
+    inverted_labels = [label for label, _, higher_is_better in metrics if not higher_is_better]
+    if inverted_labels:
+        fig.text(
+            0.5,
+            0.02,
+            "Note: lower-is-better metrics are inverted: " + ", ".join(inverted_labels),
+            ha="center",
+            fontsize=8,
+            color="#666666",
+            style="italic",
+        )
     fig.tight_layout()
 
     path = os.path.join(output_dir, DEFAULT_RADAR_FILE)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return [path]
+
+
+def generate_tiered_dashboard(
+    model_summary: List[Dict[str, str]],
+    metric_summary: List[Dict[str, str]],
+    mds_rows: List[Dict[str, str]],
+    output_path: str,
+) -> List[str]:
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "sans-serif",
+        ]
+    except ImportError:
+        print("matplotlib not available; skipping tiered dashboard.")
+        return []
+
+    asr_by_model: Dict[str, float] = {}
+    frr_by_model: Dict[str, float] = {}
+    for row in model_summary:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            asr_by_model[model] = float(row["avg_asr"])
+            frr_by_model[model] = float(row["avg_frr"])
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    bias_by_model: Dict[str, float] = {}
+    wsl_by_model: Dict[str, float] = {}
+    cm_by_model: Dict[str, float] = {}
+    for row in metric_summary:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            bias_by_model[model] = float(row["bias"])
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            wsl_by_model[model] = float(row["wsl"])
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            cm_by_model[model] = float(row["cm"])
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    mu_by_model: Dict[str, float] = {}
+    sigma_by_model: Dict[str, float] = {}
+    mds_by_model: Dict[str, float] = {}
+    for row in mds_rows:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            mu_by_model[model] = float(row["mu_asr"])
+            sigma_by_model[model] = float(row["sigma_asr"])
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            mds_by_model[model] = float(row["mds"])
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    if not (asr_by_model or bias_by_model or wsl_by_model or cm_by_model or mu_by_model or mds_by_model):
+        return []
+
+    fig, axes = plt.subplots(2, 2, figsize=(12.5, 9.0))
+    fig.patch.set_facecolor("#fafafa")
+
+    # Panel 1: Safety-Utility Quadrant (ASR vs FRR)
+    ax = axes[0, 0]
+    models = sorted(set(asr_by_model) & set(frr_by_model))
+    if models:
+        x_vals = [frr_by_model[m] for m in models]
+        y_vals = [asr_by_model[m] for m in models]
+        ax.scatter(x_vals, y_vals, s=50, color="#1f77b4", alpha=0.85)
+        for x_val, y_val, model in zip(x_vals, y_vals, models):
+            ax.text(x_val + 0.01, y_val + 0.01, model, fontsize=8, color="#333333")
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.0)
+        ax.axvline(np.median(x_vals), color="#888888", linestyle="--", linewidth=0.8)
+        ax.axhline(np.median(y_vals), color="#888888", linestyle="--", linewidth=0.8)
+        ax.set_xlabel("FRR (lower is better)")
+        ax.set_ylabel("ASR (lower is better)")
+    else:
+        ax.text(0.5, 0.5, "No ASR/FRR data", ha="center", va="center", color="#777777")
+    ax.set_title("Safety-Utility Quadrant", fontsize=11, fontweight="bold", loc="left")
+
+    # Panel 2: Business Risk (WSL + CM)
+    ax = axes[0, 1]
+    models = sorted(set(wsl_by_model) & set(cm_by_model))
+    if models:
+        x = np.arange(len(models))
+        width = 0.35
+        ax.bar(x - width / 2, [wsl_by_model[m] for m in models], width, label="WSL", color="#f4a261")
+        ax.bar(x + width / 2, [cm_by_model[m] for m in models], width, label="CM", color="#2a9d8f")
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=45, ha="right", fontsize=8)
+        ax.set_ylabel("Mean loss / cost")
+        ax.legend(frameon=False, fontsize=8)
+    else:
+        ax.text(0.5, 0.5, "No WSL/CM data", ha="center", va="center", color="#777777")
+    ax.set_title("Business Risk View", fontsize=11, fontweight="bold", loc="left")
+
+    # Panel 3: Bias Profile
+    ax = axes[1, 0]
+    models = sorted(bias_by_model, key=lambda m: bias_by_model[m])
+    if models:
+        values = [bias_by_model[m] for m in models]
+        colors = ["#d62828" if v > 0 else "#457b9d" for v in values]
+        ax.barh(models, values, color=colors, alpha=0.9)
+        ax.axvline(0.0, color="#666666", linewidth=1.0)
+        ax.set_xlabel("Bias (0 = balanced)")
+        ax.tick_params(axis="y", labelsize=8)
+    else:
+        ax.text(0.5, 0.5, "No Bias data", ha="center", va="center", color="#777777")
+    ax.set_title("Model Bias Profile", fontsize=11, fontweight="bold", loc="left")
+
+    # Panel 4: Stability (mu/sigma or MDS fallback)
+    ax = axes[1, 1]
+    models = sorted(set(mu_by_model) & set(sigma_by_model))
+    if models:
+        x_vals = [mu_by_model[m] for m in models]
+        y_vals = [sigma_by_model[m] for m in models]
+        ax.scatter(x_vals, y_vals, s=50, color="#6c757d", alpha=0.85)
+        for x_val, y_val, model in zip(x_vals, y_vals, models):
+            ax.text(x_val + 0.01, y_val + 0.01, model, fontsize=8, color="#333333")
+        ax.set_xlim(0.0, 1.0)
+        max_sigma = max(y_vals) if y_vals else 1.0
+        ax.set_ylim(0.0, max(0.1, max_sigma * 1.1))
+        ax.set_xlabel("ASR mean (mu)")
+        ax.set_ylabel("ASR std (sigma)")
+    elif mds_by_model:
+        models = sorted(mds_by_model, key=lambda m: mds_by_model[m], reverse=True)
+        ax.bar(models, [mds_by_model[m] for m in models], color="#4c78a8", alpha=0.85)
+        ax.set_xticklabels(models, rotation=45, ha="right", fontsize=8)
+        ax.set_ylabel("MDS")
+    else:
+        ax.text(0.5, 0.5, "No stability data", ha="center", va="center", color="#777777")
+    ax.set_title("Stability Snapshot", fontsize=11, fontweight="bold", loc="left")
+
+    fig.suptitle("Tiered Safety Dashboard", fontsize=14, fontweight="bold", y=0.98)
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.96])
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return [output_path]
+
+
+def generate_exec_summary(
+    model_summary: List[Dict[str, str]],
+    metric_summary: List[Dict[str, str]],
+    mds_rows: List[Dict[str, str]],
+    output_path: str,
+) -> List[str]:
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "sans-serif",
+        ]
+    except ImportError:
+        print("matplotlib not available; skipping exec summary.")
+        return []
+
+    asr_by_model: Dict[str, float] = {}
+    frr_by_model: Dict[str, float] = {}
+    for row in model_summary:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            asr_by_model[model] = float(row["avg_asr"])
+            frr_by_model[model] = float(row["avg_frr"])
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    mds_by_model: Dict[str, float] = {}
+    for row in mds_rows:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            mds_by_model[model] = float(row["mds"])
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    wsl_by_model: Dict[str, float] = {}
+    cm_by_model: Dict[str, float] = {}
+    for row in metric_summary:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            wsl_by_model[model] = float(row["wsl"])
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            cm_by_model[model] = float(row["cm"])
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    if not (asr_by_model and frr_by_model):
+        return []
+
+    simple_models = sorted(set(asr_by_model) & set(frr_by_model))
+    simple_scores = {
+        model: 1.0 - (asr_by_model[model] + frr_by_model[model]) / 2.0
+        for model in simple_models
+    }
+
+    weighted_models = sorted(
+        set(asr_by_model)
+        & set(frr_by_model)
+        & set(mds_by_model)
+        & set(wsl_by_model)
+        & set(cm_by_model)
+    )
+
+    def _minmax(vals: List[float]) -> List[float]:
+        min_val = min(vals)
+        max_val = max(vals)
+        if max_val == min_val:
+            return [1.0 for _ in vals]
+        return [(val - min_val) / (max_val - min_val) for val in vals]
+
+    weights = {
+        "ASR": 0.40,
+        "FRR": 0.25,
+        "MDS": 0.20,
+        "WSL": 0.10,
+        "CM": 0.05,
+    }
+
+    weighted_scores: Dict[str, float] = {}
+    if weighted_models:
+        asr_vals = [asr_by_model[m] for m in weighted_models]
+        frr_vals = [frr_by_model[m] for m in weighted_models]
+        mds_vals = [mds_by_model[m] for m in weighted_models]
+        wsl_vals = [wsl_by_model[m] for m in weighted_models]
+        cm_vals = [cm_by_model[m] for m in weighted_models]
+
+        asr_norm = [1.0 - v for v in _minmax(asr_vals)]
+        frr_norm = [1.0 - v for v in _minmax(frr_vals)]
+        mds_norm = _minmax(mds_vals)
+        wsl_norm = [1.0 - v for v in _minmax(wsl_vals)]
+        cm_norm = [1.0 - v for v in _minmax(cm_vals)]
+
+        for idx, model in enumerate(weighted_models):
+            weighted_scores[model] = (
+                weights["ASR"] * asr_norm[idx]
+                + weights["FRR"] * frr_norm[idx]
+                + weights["MDS"] * mds_norm[idx]
+                + weights["WSL"] * wsl_norm[idx]
+                + weights["CM"] * cm_norm[idx]
+            )
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.8))
+    fig.patch.set_facecolor("#fafafa")
+
+    ax = axes[0]
+    models = sorted(simple_scores, key=lambda m: simple_scores[m], reverse=True)
+    ax.barh(models, [simple_scores[m] for m in models], color="#457b9d", alpha=0.9)
+    ax.invert_yaxis()
+    ax.set_xlim(0.0, 1.0)
+    ax.set_xlabel("Score (1 = best)")
+    ax.set_title("Simple Score (1 - (ASR+FRR)/2)", fontsize=11, fontweight="bold", loc="left")
+    ax.tick_params(axis="y", labelsize=8)
+
+    ax = axes[1]
+    if weighted_scores:
+        models = sorted(weighted_scores, key=lambda m: weighted_scores[m], reverse=True)
+        ax.barh(models, [weighted_scores[m] for m in models], color="#2a9d8f", alpha=0.9)
+        ax.invert_yaxis()
+        ax.set_xlim(0.0, 1.0)
+        ax.set_xlabel("Score (weighted)")
+        ax.set_title("Weighted Score (ASR/FRR/MDS/WSL/CM)", fontsize=11, fontweight="bold", loc="left")
+        ax.tick_params(axis="y", labelsize=8)
+        ax.text(
+            0.0,
+            -0.12,
+            "Weights: ASR 0.40, FRR 0.25, MDS 0.20, WSL 0.10, CM 0.05",
+            transform=ax.transAxes,
+            fontsize=8,
+            color="#555555",
+        )
+    else:
+        ax.text(0.5, 0.5, "No full-metric data", ha="center", va="center", color="#777777")
+        ax.set_axis_off()
+
+    fig.suptitle("Executive Summary Overview", fontsize=14, fontweight="bold", y=0.98)
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.95])
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return [output_path]
 
 
 def write_markdown(
@@ -812,6 +1132,8 @@ def write_markdown(
     input_path: str,
     mds_dir: str,
     radar_paths: List[str],
+    tiered_paths: List[str],
+    exec_summary_paths: List[str],
 ) -> None:
     lines = [
         "# Evaluation Overview",
@@ -883,6 +1205,32 @@ def write_markdown(
             rel_attack_bar = os.path.relpath(attack_bar_path, os.path.dirname(output_path))
             lines.extend(["", f"![Attack Average ASR Bar]({rel_attack_bar})"])
 
+    if exec_summary_paths:
+        lines.extend(
+            [
+                "",
+                "## Executive Summary Overview",
+                "",
+                "Left: simple score (1 - (ASR+FRR)/2). Right: weighted score.",
+                "",
+            ]
+        )
+        rel_exec = os.path.relpath(exec_summary_paths[0], os.path.dirname(output_path))
+        lines.append(f"![Executive Summary]({rel_exec})")
+
+    if tiered_paths:
+        lines.extend(
+            [
+                "",
+                "## Tiered Safety Dashboard",
+                "",
+                "Dashboard separates safety-utility tradeoffs, business risk, and model bias/stability.",
+                "",
+            ]
+        )
+        rel_tiered = os.path.relpath(tiered_paths[0], os.path.dirname(output_path))
+        lines.append(f"![Tiered Dashboard]({rel_tiered})")
+
     if mds_rows:
         lines.extend(
             [
@@ -939,7 +1287,11 @@ def write_markdown(
                 "",
                 "## Model Metrics Radar (Normalized)",
                 "",
-                "Radar chart is min-max normalized across models per metric (higher is better).",
+                (
+                    "Radar chart is min-max normalized per metric. "
+                    "Lower-is-better metrics are inverted (ASR/FRR/Bias), "
+                    "so outward always means better performance."
+                ),
                 "",
             ]
         )
@@ -1102,6 +1454,16 @@ def main() -> None:
     parser.add_argument("--frr-bar", default=DEFAULT_FRR_MODEL_BAR, help="FRR model bar chart path")
     parser.add_argument("--frr-dir", default=DEFAULT_FRR_DIR, help="Directory with FRR reports")
     parser.add_argument("--radar-dir", default=DEFAULT_RADAR_DIR, help="Radar chart output directory")
+    parser.add_argument(
+        "--tiered-dashboard",
+        default=DEFAULT_TIERED_DASHBOARD,
+        help="Tiered dashboard image path",
+    )
+    parser.add_argument(
+        "--exec-summary",
+        default=DEFAULT_EXEC_SUMMARY,
+        help="Executive summary overview image path",
+    )
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     args = parser.parse_args()
 
@@ -1135,6 +1497,8 @@ def main() -> None:
     kappa_summary = read_kappa_summary(os.path.abspath(args.kappa_csv))
     plot_paths: List[str] = []
     radar_paths: List[str] = []
+    tiered_paths: List[str] = []
+    exec_summary_paths: List[str] = []
     if not args.no_plots:
         plot_paths = generate_plots(
             rows,
@@ -1155,41 +1519,17 @@ def main() -> None:
                 os.path.abspath(args.mds_bar),
             )
         )
-
-        model_asr = {row["model"]: float(row["avg_asr"]) for row in model_summary if row.get("avg_asr")}
-        model_mds = {
-            row["model"]: float(row["mds"])
-            for row in mds_rows
-            if row.get("mds")
-        }
-        model_bias = {
-            row["model"]: float(row["bias"])
-            for row in metric_summary
-            if row.get("bias")
-        }
-        model_wsl = {
-            row["model"]: float(row["wsl"])
-            for row in metric_summary
-            if row.get("wsl")
-        }
-        model_cm = {
-            row["model"]: float(row["cm"])
-            for row in metric_summary
-            if row.get("cm")
-        }
-        model_frr = {
-            row["model"]: float(row["avg_frr"])
-            for row in model_summary
-            if row.get("avg_frr")
-        }
-        radar_paths = generate_radar_plots(
-            model_asr,
-            model_frr,
-            model_mds,
-            model_bias,
-            model_wsl,
-            model_cm,
-            os.path.abspath(args.radar_dir),
+        tiered_paths = generate_tiered_dashboard(
+            model_summary,
+            metric_summary,
+            mds_rows,
+            os.path.abspath(args.tiered_dashboard),
+        )
+        exec_summary_paths = generate_exec_summary(
+            model_summary,
+            metric_summary,
+            mds_rows,
+            os.path.abspath(args.exec_summary),
         )
     write_markdown(
         args.output,
@@ -1204,6 +1544,8 @@ def main() -> None:
         input_path,
         mds_dir,
         radar_paths,
+        tiered_paths,
+        exec_summary_paths,
     )
     print(f"Wrote {args.output}")
 
