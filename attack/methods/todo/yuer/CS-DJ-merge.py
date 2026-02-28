@@ -23,6 +23,49 @@ from models import load_model
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 
+"""
+  整体流程（attack()）
+
+  1. _load_query_groups()
+      - 从 data_path 或 jailbreak_folder_path 读取 query
+  2. build_image_embeddings()
+      - 用 CLIP (clip-ViT-L-14) 给 src_dir 里的图像做 embedding
+  3. build_distraction_map()
+      - 对每个 query，挑选 15 张与 query 语义最远的图（最大化余弦距离）
+  4. run_main_pipeline()
+      - 用文本拆分模型生成 3 个子问题
+      - 把子问题渲染成图片 + 干扰图拼图
+      - 用固定 prompt 调用目标模型并保存结果
+
+  关键模块拆解
+
+  1. 图像干扰图选择
+
+  - build_image_embeddings: CLIP embedding 缓存到 save_embeding_path
+  - build_distraction_map:
+      - 对每个 query 计算文本 embedding
+      - 迭代 15 次挑选与当前组合 embedding 最“不相似”的图（取最小 cos_sim）
+      - 输出映射 query → [image_paths]
+
+  2. 文本拆分
+
+  - run_main_pipeline 内：
+      - 使用 split_model_name（默认 Qwen/Qwen2.5-3B-Instruct）
+      - 把原 query 拆成 3 个子问题（使用 split_prompt_template）
+      - 若无法稳定拆出 3 个子问题则跳过
+
+  3. 文本转图像 + 拼图
+
+  - text_to_art_image: 将每个子问题渲染成图片
+  - concatenate_images_with_padding:
+      - 取 9 张干扰图 + 3 张文本图拼成 3×4 拼图（target_size 500x500）
+
+  4. 最终攻击调用
+
+  - input_text 是固定 prompt（“老师给了一些图…请重点分析第10/11/12张...”）
+  - 构造 build_messages(input_text, images=[拼图])
+  - 调目标模型得到响应
+"""
 
 @dataclass
 class AttackConfig:

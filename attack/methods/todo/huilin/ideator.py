@@ -13,6 +13,52 @@ from models import load_model
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 
+"""
+  总体思路
+  IDEATOR 是一个“攻击提示生成器”+“目标模型反馈”的迭代方法。
+  流程是：攻击模型先生成一对（图片 prompt + 文本 prompt），然后用这对去攻击目标模型，再根据目标模型的输出进行下一轮改
+  写。
+
+  核心流程
+
+  1. 读取数据集（AttackDataset）
+  2. 对每个样本循环：
+      - 用攻击模型生成 JSON（image prompt + text prompt）
+      - 生成图片（文本渲染或扩散模型）
+      - 把图片 + 文本 prompt 输入目标模型
+      - 看目标模型是否拒绝
+      - 把目标模型输出反馈给攻击模型继续优化
+
+  关键模块
+
+  1. 攻击模型生成（attacker_model）
+      - 使用 ideator_user_prompt_template
+      - 输出 JSON 格式：
+
+        {"image prompt": "...", "text prompt": "..."}
+      - 若解析失败则 fallback（用原始 query 作为 image/text）
+  2. 图像生成
+      - image_generation_backend = "text"（默认）：把 image prompt 渲染成文字图片
+      - image_generation_backend = "diffusers"：用扩散模型生成图
+          - 需要 diffusion_model_id
+  3. 目标模型攻击
+      - 输入为 build_messages(text_prompt, images=[image_path])
+      - 返回 response
+  4. 迭代优化
+      - 每轮把目标模型输出塞进 ideator_feedback_template
+      - 继续下一轮生成新的攻击对
+      - 选“最优”结果：优先选非拒答输出
+
+  关键配置项
+
+  - attacker_model_*: 攻击提示生成模型
+  - target_model_*: 被攻击模型
+  - num_queries: 每条样本的迭代次数
+  - num_streams: 并行尝试次数
+  - max_parse_retries: JSON 解析失败的重试
+  - image_generation_backend: text / diffusers
+  - keep_generated_images, image_root_out
+"""
 
 @dataclass
 class AttackConfig:

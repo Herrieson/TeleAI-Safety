@@ -22,6 +22,38 @@ from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 from models import load_model
 
+"""
+  总体思路
+  “SI Attack” 的核心就是对文本和图像做随机打乱，制造对抗输入：
+
+  - 文本：打乱词序
+  - 图像：把图切成固定大小 patch，然后随机重排 patch
+
+  关键流程
+
+  1. 读数据：AttackDataset + data_offset
+  2. 对每个样本重复 num_trials 次
+  3. 文本处理：shuffle_sentence 随机打乱词序
+  4. 图像处理：shuffle_image 将图像切成 patch_size 的方块并随机重排
+  5. 生成新输入：
+      - 文本用打乱后的 final_query
+      - 图像用打乱后的图（转成 data URL）
+  6. 调目标模型并保存结果
+
+  输入
+
+  - 需要 query/prompt/question 之一
+  - 图像从 inputs 里解析（支持 image_rel + image_root_in，或者 image_path/images 等）
+
+  输出
+
+  - example_idx
+  - trial_idx
+  - query（原始）
+  - final_query（打乱后的文本）
+  - final_image（可选保存）
+  - response
+"""
 
 def shuffle_sentence(sentence: str) -> str:
     words = sentence.split()

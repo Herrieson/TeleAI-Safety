@@ -23,6 +23,47 @@ from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 from models import load_model
 
+"""
+  1. mixup / imgocr-mixup
+
+  - 函数：mixup_images(image1_path, image2_path, alpha)
+  - 步骤：
+      1. 读两张图（有害图 + 无害图），转 RGBA
+      2. 各自按最长边缩放到 320（resize_image_to_longest_axis），再 pad 到同一尺寸
+      3. 直接 Image.blend(image1, image2, alpha)
+  - 文本：保持原 prompt，不改
+  - 输出：混合图作为输入调用模型
+
+  2. cutmix_original / imgocr-cutmix
+
+  - 函数：cutmix_original_images(image1_path, image2_path, alpha)
+  - 步骤：
+      1. 同样 resize + pad 到同一尺寸
+      2. 依据 alpha 取一个矩形区域大小
+      3. 从 image2 里裁剪该区域并贴到 image1 的同位置
+  - 文本：保持原 prompt
+  - 输出：拼贴图作为输入调用模型
+
+  3. cutmix_resizemix / imgocr-resizemix
+
+  - 函数：cutmix_resizemix_images(image1_path, image2_path, alpha)
+  - 步骤：
+      1. 同样 resize + pad 到同一尺寸
+      2. 依据 alpha 取矩形区域大小
+      3. 不是裁剪原区域，而是把 image2 整体 resize 到该 patch 尺寸再贴到 image1
+  - 文本：保持原 prompt
+  - 输出：拼贴图作为输入调用模型
+
+  4. randaug{N}（如 randaug2, randaug3）
+
+  - 类：RandAug(n_ops=N, r=harmful_alpha)
+  - 步骤：
+      1. 从预定义增强里随机选 N 个（模糊、旋转、亮度/对比度、色彩、solarize、posterize、cutout、crop、shear 等）
+      2. 按顺序应用到图像
+      3. 随机性由 seed=hash(...) 固定，可复现
+  - 文本：保持原 prompt
+  - 输出：增强后的单图作为输入调用模型
+"""
 
 def read_json(file_path: str) -> Dict[str, Any]:
     with open(file_path, "r", encoding="utf-8") as f:

@@ -13,6 +13,61 @@ from models import load_model
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 
+"""
+  总体思路
+  VisCRA 的核心是：先用一个“注意力模型”定位图像中最重要的区域，然后用遮挡（mask）覆盖这些区域，再将遮挡后的图像 + 原始文
+  本 prompt 送入目标模型，观察其输出。
+
+  ———
+
+  核心流程
+
+  1. 读取数据集（AttackDataset）
+  2. 对每条样本：
+      - 从 inputs 解析图像路径
+      - 如果没有图像 → 直接用文本 prompt 调用目标模型
+      - 如果有图像 → 计算注意力图 or 使用默认中心块
+      - 在图上遮挡注意力块
+      - 用遮挡图 + 原 query 调目标模型
+      - 保存结果
+
+  ———
+
+  关键组件
+  1. 注意力模型（attention_model_path）
+
+  - 用 Qwen2.5-VL 之类模型提取跨模态注意力
+  - 根据 attention_layer, vision_token_id, grid_dim 生成注意力图
+  - 选出最重要的区域块
+
+  2. 遮挡策略
+
+  - 在注意力最高的块区域画一个矩形遮挡（默认绿色）
+  - 可输出多张遮挡图（num_masks）
+
+  3. 回退策略
+
+  - 如果没提供 attention_model_path：默认遮挡图像中心块
+
+  ———
+
+  关键配置项
+
+  - attention_model_path: 注意力模型路径（留空就用默认中心遮挡）
+  - attention_layer, vision_token_id, grid_dim
+  - attention_block_size, attention_stride, attention_max_overlap
+  - num_masks, mask_color
+  - keep_masked_images, image_root_out
+
+  ———
+
+  输出字段
+
+  - example_idx, query, final_query, response
+  - viscra_source_image: 原图路径
+  - viscra_masked_image: 遮挡图路径
+  - viscra_blocks: 遮挡块位置 (row, col)
+"""
 
 @dataclass
 class AttackConfig:

@@ -13,6 +13,54 @@ from models import load_model
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 
+"""
+  总体思路
+  FigStep 是一个“把文本写进图片，再用图像引导模型输出步骤”的方法。
+  有两个模式：
+
+  - figstep（默认）
+  - figstep_pro（更复杂，拆分图像）
+
+  核心流程
+
+  1. 读 AttackDataset
+  2. 取 query 作为“要写进图片的文本”
+  3. 生成图片（或用已有图）
+  4. 用固定的 prompt 诱导模型输出步骤
+  5. 保存结果
+
+  ———
+
+  模式 1：figstep
+
+  - 生成一张图片，内容是“query + 1./2./3.”步骤空白列表
+  - 发送固定 prompt benign_text_prompt
+    让模型“补全图中列表内容”
+  - 输出模型响应
+
+  模式 2：figstep_pro
+
+  - 生成一张完整图后，切成 3 张子图
+  - 发送 figstep_pro_primary_prompt_template
+    诱导模型把 3 张子图拼接理解成“Steps to *”
+  - 如果模型拒绝，再换成 figstep_pro_candidate_prompt_template
+
+  ———
+
+  关键配置项
+
+  - mode: figstep 或 figstep_pro
+  - steps: 列表步数
+  - wrap_width: 文本换行宽度
+  - font_path, font_size, image_size
+  - keep_generated_images, image_root_out
+  - use_existing_images: 是否使用样本自带图片
+
+  输入支持
+
+  - query/prompt/question
+  - 可读取 inputs.images/image/image_url/image_rel
+"""
 
 @dataclass
 class AttackConfig:

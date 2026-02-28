@@ -14,6 +14,54 @@ from models import load_model
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from utils.message_builder import build_messages
 
+"""
+  整体思路
+  BAP 是一个“双路攻击”方法：
+
+  1. 文本攻击：用一个“攻击模型”重写原始 query，使其更隐蔽/间接；
+  2. 图像攻击：对输入图像加噪声（或使用指定的对抗图），然后与原图一起喂给目标模型。
+
+  核心流程
+
+  1. 从 AttackDataset 读取样本
+  2. 对每条样本：
+      - 取出 query
+      - 文本重写（_attack_text）
+      - 如果 image_attack_mode = noise，对原图加噪生成对抗图
+      - 把对抗图和原图合并成 inputs.images
+      - 调用目标模型
+      - 保存结果
+
+  关键功能模块
+
+  1. 文本重写
+      - text_attack_mode = rewrite 默认开启
+      - 使用 attacker_model 生成重写后的 prompt
+      - prompt 模板：rewrite_user_prompt_template
+  2. 图像扰动
+      - image_attack_mode = noise
+      - 从原图加载 → 加 uniform 噪声（noise_epsilon）
+      - 可保存对抗图（keep_adversarial_images + image_root_out）
+  3. 合并输入
+      - _build_inputs 可以把对抗图放在前/后
+      - 也可以选择是否保留原图
+
+  输入支持
+
+  - query/prompt/question
+  - 图像路径支持：
+      - inputs.image_rel + inputs.image_root_in
+      - inputs.image_path / source_image_path / image
+      - inputs.images
+
+  输出字段
+
+  - example_idx
+  - query
+  - final_query（重写后的）
+  - response
+  - bap_adversarial_image（噪声图路径或原始对抗图路径）
+"""
 
 @dataclass
 class AttackConfig:
