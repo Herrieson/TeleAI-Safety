@@ -137,6 +137,9 @@ class FRRMetric(Metric):
         query = sample.get("query")
         response = sample.get("response")
         safety_label = sample.get("safety_label")
+        precomputed_label = sample.get("frr_label")
+        precomputed_mode = sample.get("frr_mode")
+        precomputed_model = sample.get("frr_judge_model")
         if isinstance(response, list) and len(response) == 1:
             response = response[0]
         if isinstance(query, list) and len(query) == 1:
@@ -148,6 +151,19 @@ class FRRMetric(Metric):
         if safety_label != 0:
             return MetricUpdate()
 
+        if isinstance(precomputed_label, int) and precomputed_label in (0, 1):
+            if isinstance(precomputed_mode, str) and precomputed_mode != self.mode:
+                return MetricUpdate(skipped=1)
+            if isinstance(precomputed_model, str) and self.mode == "llm" and precomputed_model != self.llm_model:
+                return MetricUpdate(skipped=1)
+            prediction = {
+                "frr_label": precomputed_label,
+                "frr_mode": self.mode,
+            }
+            if self.mode == "llm":
+                prediction["frr_judge_model"] = self.llm_model
+            return MetricUpdate(total=1, success=precomputed_label, extra={"prediction": prediction})
+
         refusal: Optional[bool] = None
         if self.mode == "rule":
             refusal = self._is_refusal_rule(response)
@@ -157,8 +173,16 @@ class FRRMetric(Metric):
             raise ValueError(f"Unsupported FRR mode: {self.mode}")
 
         if refusal is None:
-            return MetricUpdate(skipped=1)
-        return MetricUpdate(total=1, success=1 if refusal else 0)
+            return MetricUpdate(skipped=1, extra={"prediction": {"frr_label": -1, "frr_mode": self.mode}})
+
+        label = 1 if refusal else 0
+        prediction = {
+            "frr_label": label,
+            "frr_mode": self.mode,
+        }
+        if self.mode == "llm":
+            prediction["frr_judge_model"] = self.llm_model
+        return MetricUpdate(total=1, success=label, extra={"prediction": prediction})
 
     def render_report(self, *, state: MetricState, input_file: str) -> str:
         summary = self.finalize(state)

@@ -12,6 +12,9 @@ ASR_ROOT="${ROOT_DIR}/metrics/asr"
 RESULTS_DIR="${ROOT_DIR}/../data/attack_results"
 OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/asr"
 FRR_OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/frr"
+ASR_LABEL_ROOT="${ROOT_DIR}/evaluation_report/asr_labels"
+FRR_LABEL_ROOT="${ROOT_DIR}/evaluation_report/frr_labels"
+TERNARY_LABEL_ROOT="${ROOT_DIR}/evaluation_report/ternary_labels"
 
 # 默认 scorer 列表（按需扩展）
 DEFAULT_SCORERS=("PatternScorer" "PrefixMatchScorer" "ClassficationScorer" "GPTScorer" "GPT5Scorer" "DSV3Scorer" "DSR1Scorer" "MultiAPIScorer")
@@ -54,6 +57,9 @@ fi
 
 mkdir -p "${OUTPUT_ROOT}"
 mkdir -p "${FRR_OUTPUT_ROOT}"
+mkdir -p "${ASR_LABEL_ROOT}"
+mkdir -p "${FRR_LABEL_ROOT}"
+mkdir -p "${TERNARY_LABEL_ROOT}"
 
 FRR_MODE="${EVAL_FRR_MODE:-llm}"
 
@@ -62,8 +68,10 @@ for json_path in "${filtered_result_files[@]}"; do
   rel_path="${json_path#${RESULTS_DIR}/}"
   rel_no_ext="${rel_path%.jsonl}"
   output_dir="${OUTPUT_ROOT}/${rel_no_ext}"
+  asr_label_dir="${ASR_LABEL_ROOT}/${rel_no_ext}"
   base_name="$(basename "${rel_no_ext}")"
   mkdir -p "${output_dir}"
+  mkdir -p "${asr_label_dir}"
 
   for scorer in "${SCORERS[@]}"; do
     cfg="${CONFIG_MAP[${scorer}]:-}"
@@ -76,34 +84,70 @@ for json_path in "${filtered_result_files[@]}"; do
       continue
     fi
     out_path="${output_dir}/${base_name}.txt"
-    # Skip if any existing report for this scorer in the output dir (tolerate legacy file names)
-    existing_glob=("${output_dir}"/*_"${scorer}".txt)
+    asr_label_path="${asr_label_dir}/${base_name}_${scorer}.jsonl"
+    report_exists=0
     if compgen -G "${output_dir}/*_${scorer}.txt" > /dev/null; then
-      echo "Skip ${scorer} on ${rel_path}: output already exists"
+      report_exists=1
+    fi
+    if [[ ${report_exists} -eq 1 && -f "${asr_label_path}" ]]; then
+      echo "Skip ${scorer} on ${rel_path}: report and labels already exist"
+      continue
+    fi
+    metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s"}}' "${scorer}" "${cfg}")
+    if [[ ! -f "${asr_label_path}" ]]; then
+      echo "Annotating ${scorer} on ${rel_path} -> ${asr_label_path}"
+      uv run python evaluate_metrics.py \
+        --metrics="ASR" \
+        --metric_args="${metric_args_json}" \
+        --json_path="${json_path}" \
+        --prediction_output_path="${asr_label_path}" \
+        --annotate_only
+    fi
+    if [[ ${report_exists} -eq 1 ]]; then
+      echo "Skip report ${scorer} on ${rel_path}: output already exists"
       continue
     fi
     echo "Running ${scorer} on ${rel_path}"
-    metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s"}}' "${scorer}" "${cfg}")
     uv run python evaluate_metrics.py \
       --metrics="ASR" \
       --metric_args="${metric_args_json}" \
-      --json_path="${json_path}" \
+      --json_path="${asr_label_path}" \
       --output_path="${out_path}"
   done
 
   frr_out_dir="${FRR_OUTPUT_ROOT}/${rel_no_ext}"
+  frr_label_dir="${FRR_LABEL_ROOT}/${rel_no_ext}"
   mkdir -p "${frr_out_dir}"
+  mkdir -p "${frr_label_dir}"
   frr_out_path="${frr_out_dir}/${base_name}_frr.txt"
+  frr_label_path="${frr_label_dir}/${base_name}_frr_${FRR_MODE}.jsonl"
   legacy_frr_out_path="${frr_out_dir}/${base_name}.txt"
+  frr_report_exists=0
   if compgen -G "${frr_out_dir}/*_frr.txt" > /dev/null || [[ -f "${legacy_frr_out_path}" ]]; then
-    echo "Skip FRR on ${rel_path}: output already exists"
+    frr_report_exists=1
+  fi
+  if [[ ${frr_report_exists} -eq 1 && -f "${frr_label_path}" ]]; then
+    echo "Skip FRR on ${rel_path}: report and labels already exist"
     continue
   fi
   frr_args_json=$(printf '{"FRR":{"mode":"%s"}}' "${FRR_MODE}")
+  if [[ ! -f "${frr_label_path}" ]]; then
+    echo "Annotating FRR(${FRR_MODE}) on ${rel_path} -> ${frr_label_path}"
+    uv run python evaluate_metrics.py \
+      --metrics="FRR" \
+      --metric_args="${frr_args_json}" \
+      --json_path="${json_path}" \
+      --prediction_output_path="${frr_label_path}" \
+      --annotate_only
+  fi
+  if [[ ${frr_report_exists} -eq 1 ]]; then
+    echo "Skip FRR report on ${rel_path}: output already exists"
+    continue
+  fi
   uv run python evaluate_metrics.py \
     --metrics="FRR" \
     --metric_args="${frr_args_json}" \
-    --json_path="${json_path}" \
+    --json_path="${frr_label_path}" \
     --output_path="${frr_out_path}"
 done
 
@@ -146,21 +190,36 @@ if [[ -d "${TERNARY_DIR}" ]]; then
   else
     echo "Running ternary labeling in ${TERNARY_DIR}"
     for json_path in "${ternary_files[@]}"; do
+      rel_path="${json_path#${TERNARY_DIR}/}"
+      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+      ternary_label_dir="$(dirname "${ternary_label_path}")"
+      mkdir -p "${ternary_label_dir}"
+      if [[ -f "${ternary_label_path}" ]]; then
+        echo "Skip ternary annotation on ${rel_path}: labels already exist"
+        continue
+      fi
       uv run python metrics/ternary_metrics.py \
         --input "${json_path}" \
+        --output "${ternary_label_path}" \
         --judge-deployment "${AZURE_OPENAI_DEPLOYMENT}"
     done
-    echo "Running bias metrics in ${TERNARY_DIR}" # 计算 bias
+    echo "Running bias metrics in ${TERNARY_LABEL_ROOT}" # 计算 bias
     for json_path in "${ternary_files[@]}"; do
-      uv run python metrics/bias_metrics.py --input "${json_path}"
+      rel_path="${json_path#${TERNARY_DIR}/}"
+      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+      uv run python metrics/bias_metrics.py --input "${ternary_label_path}"
     done
-    echo "Running WSL metrics in ${TERNARY_DIR}" # 计算加权安全损失
+    echo "Running WSL metrics in ${TERNARY_LABEL_ROOT}" # 计算加权安全损失
     for json_path in "${ternary_files[@]}"; do
-      uv run python metrics/wsl_metrics.py --input "${json_path}"
+      rel_path="${json_path#${TERNARY_DIR}/}"
+      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+      uv run python metrics/wsl_metrics.py --input "${ternary_label_path}"
     done
-    echo "Running cost matrix metrics in ${TERNARY_DIR}" # 计算代价矩阵
+    echo "Running cost matrix metrics in ${TERNARY_LABEL_ROOT}" # 计算代价矩阵
     for json_path in "${ternary_files[@]}"; do
-      uv run python metrics/cm_metrics.py --input "${json_path}"
+      rel_path="${json_path#${TERNARY_DIR}/}"
+      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+      uv run python metrics/cm_metrics.py --input "${ternary_label_path}"
     done
   fi
 fi

@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from metrics import ASRMetric, ASRMetricConfig, get_metric
 from metrics.base_metric import MetricUpdate
@@ -13,6 +13,8 @@ def parse_sample(line: str) -> Dict[str, Any]:
         item = json.loads(line.strip())
     except Exception as e:
         print(f"[Scoring] JSON parse failed: {e}", flush=True)
+        return {}
+    if not isinstance(item, dict):
         return {}
     query = None
     response = None
@@ -27,7 +29,13 @@ def parse_sample(line: str) -> Dict[str, Any]:
             response = item[field]
             break
     safety_label = item.get("safety_label")
-    return {"query": query, "response": response, "safety_label": safety_label}
+    return {
+        **item,
+        "query": query,
+        "response": response,
+        "safety_label": safety_label,
+        "__raw__": item,
+    }
 
 
 def build_metrics(metric_names: List[str], metric_args: Dict[str, Dict]) -> List:
@@ -65,6 +73,17 @@ def main():
     parser.add_argument("--json_path", type=str, required=True, help="Path to json file for evaluation")
     parser.add_argument("--output_path", type=str, default="./eval_summary.txt", help="Path to output summary txt")
     parser.add_argument("--workers", type=int, default=32, help="Number of threads for scoring")
+    parser.add_argument(
+        "--prediction_output_path",
+        type=str,
+        default="",
+        help="Optional output JSONL path for per-sample predictions",
+    )
+    parser.add_argument(
+        "--annotate_only",
+        action="store_true",
+        help="Only save per-sample predictions and skip summary report generation",
+    )
     args = parser.parse_args()
 
     metric_names = [m.strip() for m in args.metrics.split(",") if m.strip()]
@@ -78,6 +97,7 @@ def main():
     json_path = args.json_path
     output_path = args.output_path
     workers = max(1, args.workers)
+    prediction_output_path = args.prediction_output_path.strip()
 
     # Prepare output
     output_dir = os.path.dirname(output_path)
@@ -94,23 +114,58 @@ def main():
     total_lines = len(lines)
     progress_step = max(1, total_lines // 10) if total_lines else 1
 
+    parsed_samples = [parse_sample(line) for line in lines]
     metric_states = {metric.name: metric.create_state() for metric in metrics}
+    metric_predictions: Dict[str, List[Dict[str, Any]]] = {
+        metric.name: [{} for _ in range(total_lines)] for metric in metrics
+    }
 
-    def process_line(line):
-        sample = parse_sample(line)
-        return {metric.name: metric.process_sample(sample) for metric in metrics}
+    def process_line(index_and_sample: Tuple[int, Dict[str, Any]]):
+        index, sample = index_and_sample
+        updates: Dict[str, MetricUpdate] = {}
+        predictions: Dict[str, Dict[str, Any]] = {}
+        for metric in metrics:
+            update = metric.process_sample(sample)
+            updates[metric.name] = update
+            if update.extra and isinstance(update.extra.get("prediction"), dict):
+                predictions[metric.name] = update.extra.get("prediction") or {}
+        return index, updates, predictions
 
     processed = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(process_line, line) for line in lines]
+        futures = [executor.submit(process_line, pair) for pair in enumerate(parsed_samples)]
         for future in as_completed(futures):
-            updates = future.result()
+            index, updates, predictions = future.result()
             for metric in metrics:
                 update = updates.get(metric.name) or MetricUpdate()
                 metric.merge(metric_states[metric.name], update)
+                metric_predictions[metric.name][index] = predictions.get(metric.name, {})
             processed += 1
             if total_lines and (processed % progress_step == 0 or processed == total_lines):
                 print(f"[Progress] {processed}/{total_lines} processed", flush=True)
+
+    if prediction_output_path:
+        prediction_dir = os.path.dirname(prediction_output_path)
+        if prediction_dir:
+            os.makedirs(prediction_dir, exist_ok=True)
+        for metric in metrics:
+            if len(metrics) == 1:
+                metric_prediction_path = prediction_output_path
+            else:
+                pred_stub, pred_ext = os.path.splitext(prediction_output_path)
+                metric_prediction_path = f"{pred_stub}_{metric.name}{pred_ext or '.jsonl'}"
+            with open(metric_prediction_path, "w", encoding="utf-8") as f:
+                for sample, prediction in zip(parsed_samples, metric_predictions[metric.name]):
+                    raw = sample.get("__raw__")
+                    if not isinstance(raw, dict):
+                        continue
+                    out_item = dict(raw)
+                    out_item.update(prediction or {})
+                    f.write(json.dumps(out_item, ensure_ascii=False) + "\n")
+            print(f"[Predictions] wrote {metric_prediction_path}", flush=True)
+
+    if args.annotate_only:
+        return
 
     # 输出每个指标的报告
     for metric in metrics:

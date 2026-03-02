@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 RESULTS_ROOT = os.path.join(PROJECT_ROOT, "results", "ternary")
 ALT_RESULTS_ROOT = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
+TERNARY_LABEL_ROOT = os.path.join(PROJECT_ROOT, "evaluation_report", "ternary_labels")
 REPORT_ROOT = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 
 
@@ -20,7 +21,7 @@ def parse_args() -> argparse.Namespace:
 
 def derive_output_path(input_path: str) -> str:
     abs_input = os.path.abspath(input_path)
-    results_roots = [os.path.abspath(RESULTS_ROOT), ALT_RESULTS_ROOT]
+    results_roots = [os.path.abspath(RESULTS_ROOT), ALT_RESULTS_ROOT, os.path.abspath(TERNARY_LABEL_ROOT)]
     rel = None
     for root in results_roots:
         if abs_input.startswith(root + os.sep):

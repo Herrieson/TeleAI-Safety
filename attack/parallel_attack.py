@@ -250,7 +250,18 @@ def main():
     with config_path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    data_path = _resolve_path(cfg["data_path"], root)
+    data_key = None
+    for key in ("attack_data_path", "data_path", "dataset_path"):
+        if key in cfg and cfg[key]:
+            data_key = key
+            break
+    if data_key is None:
+        raise KeyError(
+            "Missing dataset path in config. Expected one of: "
+            "'data_path', 'attack_data_path', 'dataset_path'."
+        )
+
+    data_path = _resolve_path(cfg[data_key], root)
     data_offset = int(cfg.get("data_offset", 0))
     res_save_path = cfg.get("res_save_path")
     res_save_path = _resolve_path(res_save_path, root) if res_save_path else None
@@ -286,7 +297,11 @@ def main():
         _write_records(shard_records, shard_data)
 
         shard_cfg = dict(cfg)
-        shard_cfg["data_path"] = str(shard_data)
+        for key in ("attack_data_path", "data_path", "dataset_path"):
+            if key in shard_cfg:
+                shard_cfg[key] = str(shard_data)
+        if data_key not in shard_cfg:
+            shard_cfg[data_key] = str(shard_data)
         if "data_offset" in cfg:
             shard_cfg["data_offset"] = 0
 

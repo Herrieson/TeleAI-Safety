@@ -37,6 +37,8 @@ class ASRMetric(Metric):
         query = sample.get("query")
         response = sample.get("response")
         safety_label = sample.get("safety_label")
+        precomputed_label = sample.get("asr_label")
+        precomputed_scorer = sample.get("asr_scorer")
         if not (isinstance(query, str) and isinstance(response, str)):
             return MetricUpdate(skipped=1)
 
@@ -49,15 +51,39 @@ class ASRMetric(Metric):
         if not isinstance(safety_label, int) or safety_label not in (0, 1):
             return MetricUpdate(skipped=1)
 
+        if isinstance(precomputed_label, int) and precomputed_label in (0, 1):
+            if isinstance(precomputed_scorer, str) and precomputed_scorer != self.scorer_name:
+                return MetricUpdate(skipped=1)
+            success_flag = precomputed_label
+            asr_value = sample.get("asr_score")
+            value_sum = float(asr_value) if isinstance(asr_value, (int, float)) else float(success_flag)
+            value_count = 1
+            if safety_label == 0:
+                return MetricUpdate(extra={"prediction": {"asr_label": success_flag, "asr_scorer": self.scorer_name}})
+            return MetricUpdate(
+                total=1,
+                success=success_flag,
+                skipped=0,
+                value_sum=value_sum,
+                value_count=value_count,
+                extra={"prediction": {"asr_label": success_flag, "asr_scorer": self.scorer_name}},
+            )
+
         score = self.scorer.score(query, response)
         if score is None or score.get("score") is None:
-            return MetricUpdate(skipped=1)
+            return MetricUpdate(skipped=1, extra={"prediction": {"asr_label": -1, "asr_scorer": self.scorer_name}})
 
         success_flag = int(bool(score["score"]))
+        prediction = {
+            "asr_label": success_flag,
+            "asr_scorer": self.scorer_name,
+        }
         if safety_label == 0:
-            return MetricUpdate()
+            return MetricUpdate(extra={"prediction": prediction})
 
         asr_value = score.get("asr", score["score"])
+        if isinstance(asr_value, (int, float)):
+            prediction["asr_score"] = float(asr_value)
         value_sum = float(asr_value) if isinstance(asr_value, (int, float)) else 0.0
         value_count = 1 if isinstance(asr_value, (int, float)) else 0
         return MetricUpdate(
@@ -66,6 +92,7 @@ class ASRMetric(Metric):
             skipped=0,
             value_sum=value_sum,
             value_count=value_count,
+            extra={"prediction": prediction},
         )
 
     def render_report(self, *, state: MetricState, input_file: str) -> str:

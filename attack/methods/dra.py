@@ -454,8 +454,15 @@ def main():
         config_manager = ConfigManager(config_path=config_path)
         logger.info(f"Loaded configuration from: {config_path}")
         
+        cfg = dict(config_manager.config)
+        # Backward-compatible key aliases used by other attack configs.
+        if "attack_data_path" not in cfg and cfg.get("data_path"):
+            cfg["attack_data_path"] = cfg["data_path"]
+        if "evaluator_path" not in cfg and cfg.get("evaluator_model_path"):
+            cfg["evaluator_path"] = cfg["evaluator_model_path"]
+
         # Create and run attack manager
-        attack_manager = DRAManager.from_config(config=config_manager.config)
+        attack_manager = DRAManager.from_config(config=cfg)
         attack_manager.attack()
         
     except Exception as e:
