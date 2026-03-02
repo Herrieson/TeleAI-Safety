@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from collections import Counter
 import json
 import os
 import shutil
@@ -7,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 import yaml
@@ -62,6 +63,69 @@ def _resolve_path(path_str, root: Path):
     return root / path
 
 
+def _record_key(record):
+    if isinstance(record, dict):
+        for key_name in ("id", "example_id", "sample_id", "uid"):
+            if key_name in record and record[key_name] is not None:
+                return ("id", str(record[key_name]))
+        if "query" in record and record["query"] is not None:
+            return ("query", str(record["query"]))
+    try:
+        return ("raw", json.dumps(record, ensure_ascii=False, sort_keys=True))
+    except Exception:
+        return ("raw", str(record))
+
+
+def _load_result_counts(path: Path):
+    counts = Counter()
+    if not path or not path.exists():
+        return counts
+
+    if path.suffix == ".jsonl":
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                counts[_record_key(rec)] += 1
+        return counts
+
+    if path.suffix == ".json":
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except Exception:
+            return counts
+        if isinstance(obj, list):
+            for rec in obj:
+                counts[_record_key(rec)] += 1
+        elif isinstance(obj, dict):
+            counts[_record_key(obj)] += 1
+        return counts
+
+    return counts
+
+
+def _filter_pending_records(records, completed_counts: Counter):
+    if not completed_counts:
+        return records, 0
+    rest = completed_counts.copy()
+    pending = []
+    skipped = 0
+    for rec in records:
+        key = _record_key(rec)
+        if rest.get(key, 0) > 0:
+            rest[key] -= 1
+            skipped += 1
+            continue
+        pending.append(rec)
+    return pending, skipped
+
+
 def _run_one(shard_idx, method_path, cfg_path, log_path, cwd):
     start = time.monotonic()
     with log_path.open("w", encoding="utf-8") as logf:
@@ -101,6 +165,73 @@ def _print_progress(total, completed, tmp_results, tmp_logs, start_ts):
     print(f"[progress] done {completed}/{total} | {elapsed}s | {shard_summary}", flush=True)
 
 
+def _read_new_jsonl_records(path: Path, offset: int, carry: str):
+    if not path.exists():
+        return [], offset, carry
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        f.seek(offset)
+        chunk = f.read()
+        new_offset = f.tell()
+
+    if not chunk:
+        return [], new_offset, carry
+
+    data = carry + chunk
+    lines = data.split("\n")
+    if data.endswith("\n"):
+        complete_lines = lines[:-1]
+        new_carry = ""
+    else:
+        complete_lines = lines[:-1]
+        new_carry = lines[-1]
+
+    out = []
+    for line in complete_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            continue
+    return out, new_offset, new_carry
+
+
+def _sync_partial_results(tmp_results, res_save_path, sync_state):
+    if not res_save_path or res_save_path.suffix != ".jsonl":
+        return 0
+
+    new_records = []
+    for idx, shard_res in enumerate(tmp_results):
+        recs, new_offset, new_carry = _read_new_jsonl_records(
+            shard_res,
+            sync_state["offsets"][idx],
+            sync_state["carry"][idx],
+        )
+        sync_state["offsets"][idx] = new_offset
+        sync_state["carry"][idx] = new_carry
+
+        for rec in recs:
+            key = _record_key(rec)
+            cap = sync_state["caps"].get(key)
+            seen = sync_state["seen"].get(key, 0)
+            if cap is not None and seen >= cap:
+                continue
+            new_records.append(rec)
+            sync_state["seen"][key] += 1
+
+    if not new_records:
+        return 0
+
+    res_save_path.parent.mkdir(parents=True, exist_ok=True)
+    with res_save_path.open("a", encoding="utf-8") as out_f:
+        for rec in new_records:
+            out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        out_f.flush()
+        os.fsync(out_f.fileno())
+    return len(new_records)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run attack method in parallel by sharding data.")
     parser.add_argument("--method", required=True, help="Path to attack method script (e.g., methods/pair.py).")
@@ -109,6 +240,7 @@ def main():
     parser.add_argument("--max-workers", type=int, default=None, help="Max parallel workers (default: shards).")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary shard files.")
     parser.add_argument("--progress-interval", type=int, default=15, help="Progress report interval in seconds (0 to disable).")
+    parser.add_argument("--save-interval", type=int, default=60, help="Incremental result flush interval in seconds (0 to disable).")
     args = parser.parse_args()
 
     root = Path.cwd()
@@ -127,8 +259,19 @@ def main():
     if data_offset:
         records = records[data_offset:]
 
+    existing_result_counts = Counter()
+    if res_save_path:
+        existing_result_counts = _load_result_counts(res_save_path)
+        records, skipped_count = _filter_pending_records(records, existing_result_counts)
+        if skipped_count > 0:
+            print(f"[resume] skipped {skipped_count} completed records from {res_save_path}", flush=True)
+        if not records:
+            print("[resume] no pending records to run.", flush=True)
+            return
+
     shards = max(1, int(args.shards))
     split = _split_records(records, shards)
+    pending_counts = Counter(_record_key(rec) for rec in records)
 
     tmp_root = Path(tempfile.mkdtemp(prefix="parallel_attack_", dir=None))
     tmp_configs = []
@@ -164,6 +307,15 @@ def main():
     max_workers = args.max_workers or shards
     failures = []
     shard_timings = {}
+    sync_state = None
+    if res_save_path and res_save_path.suffix == ".jsonl":
+        sync_state = {
+            "offsets": [0 for _ in tmp_results],
+            "carry": ["" for _ in tmp_results],
+            "seen": existing_result_counts.copy(),
+            "caps": existing_result_counts + pending_counts,
+        }
+
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = []
         for idx, (cfg_path, log_path) in enumerate(zip(tmp_configs, tmp_logs)):
@@ -173,33 +325,53 @@ def main():
         results = {}
         start_ts = time.time()
         progress_interval = max(0, int(args.progress_interval))
+        save_interval = max(0, int(args.save_interval))
+        last_progress_ts = start_ts
+        last_save_ts = start_ts
         while pending:
-            if progress_interval == 0:
-                done, pending = wait(pending)
-            else:
-                done, pending = wait(pending, timeout=progress_interval)
+            wait_timeout = 1
+            if progress_interval > 0:
+                wait_timeout = min(wait_timeout, progress_interval)
+            if save_interval > 0:
+                wait_timeout = min(wait_timeout, save_interval)
+            done, pending = wait(pending, timeout=wait_timeout)
             for fut in done:
                 results[fut] = fut.result()
-            if pending and progress_interval > 0:
+            now = time.time()
+            if pending and progress_interval > 0 and (now - last_progress_ts) >= progress_interval:
                 _print_progress(shards, len(results), tmp_results, tmp_logs, start_ts)
+                last_progress_ts = now
+            if sync_state and save_interval > 0 and (now - last_save_ts) >= save_interval:
+                written = _sync_partial_results(tmp_results, res_save_path, sync_state)
+                if written > 0:
+                    print(f"[save] flushed {written} records to {res_save_path}", flush=True)
+                last_save_ts = now
 
         for shard_idx, rc, elapsed in results.values():
             shard_timings[shard_idx] = elapsed
             if rc != 0:
                 failures.append(rc)
 
+    if sync_state:
+        written = _sync_partial_results(tmp_results, res_save_path, sync_state)
+        if written > 0:
+            print(f"[save] final flush {written} records to {res_save_path}", flush=True)
+
     if failures:
         print(f"One or more shards failed. Logs in: {tmp_root}", file=sys.stderr)
         sys.exit(1)
 
     if res_save_path:
-        res_save_path.parent.mkdir(parents=True, exist_ok=True)
-        with res_save_path.open("a", encoding="utf-8") as out_f:
-            for shard_res in tmp_results:
-                if not shard_res.exists():
-                    continue
-                with shard_res.open("r", encoding="utf-8") as in_f:
-                    shutil.copyfileobj(in_f, out_f)
+        if res_save_path.suffix == ".jsonl":
+            pass
+        else:
+            res_save_path.parent.mkdir(parents=True, exist_ok=True)
+            with res_save_path.open("a", encoding="utf-8") as out_f:
+                for shard_res in tmp_results:
+                    if not shard_res.exists():
+                        continue
+                    with shard_res.open("r", encoding="utf-8") as in_f:
+                        shutil.copyfileobj(in_f, out_f)
 
     if shard_timings:
         total_elapsed = sum(shard_timings.values())

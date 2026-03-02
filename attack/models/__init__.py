@@ -20,29 +20,41 @@ except Exception:
 def load_model(model_type=None, model_name=None, model_path=None, config=None):
     if model_type is None:
         return None
-    model_name_lower = model_name.lower() if model_name else ""
     model_type_lower = model_type.lower() if model_type else ""
 
-    # ✅ AzureOpenAI 模型处理
+    # ✅ Grok API model (route by model_type, not model_name substring)
+    if 'grok' in model_type_lower:
+        print("Loading GrokModel...")
+        grok_base_url = getattr(config, "grok_url", None) or getattr(config, "base_url", None)
+        grok_api_key = getattr(config, "grok_key", None) or getattr(config, "api_key", None)
+        if not grok_base_url:
+            raise ValueError("Missing Grok endpoint. Set `grok_url` (or `base_url`).")
+        if not grok_api_key:
+            raise ValueError("Missing Grok API key. Set `grok_key` (or `api_key`).")
+        return GrokModel(
+            model_name=model_name,
+            base_url=grok_base_url,
+            api_key=grok_api_key,
+        )
+
+    # ✅ AzureOpenAI model
     if 'azure' in model_type_lower:
         print("Loading AzureModel...")
-        if 'grok' in model_name_lower:
-            print("Loading GrokModel...")
-            return GrokModel(
-                model_name=model_name,      
-                base_url=config.grok_url,           
-                api_key=config.grok_key,
-                # generation_config=config.generation_config
-            )
-        else:
-            api_version = getattr(config, "azure_api_version", None) or os.getenv("AZURE_OPENAI_API_VERSION") or "2024-12-01-preview"
-            return AzureOpenAIModel(
-                model_name=model_name,       # 如 o1-preview / gpt-35-turbo
-                base_url=config.azure_url,           # https://xxx.openai.azure.com/
-                api_key=config.azure_key,
-                api_version=api_version,
-                # generation_config=config.generation_config
-            )
+        azure_base_url = getattr(config, "azure_url", None)
+        azure_api_key = getattr(config, "azure_key", None)
+        if not azure_base_url or (isinstance(azure_base_url, str) and "${" in azure_base_url):
+            raise ValueError("Missing Azure endpoint. Set `azure_url` or export AZURE_OPENAI_ENDPOINT.")
+        if not azure_api_key or (isinstance(azure_api_key, str) and "${" in azure_api_key):
+            raise ValueError("Missing Azure API key. Set `azure_key` or export AZURE_OPENAI_API_KEY.")
+
+        api_version = getattr(config, "azure_api_version", None) or os.getenv("AZURE_OPENAI_API_VERSION") or "2024-12-01-preview"
+        return AzureOpenAIModel(
+            model_name=model_name,       # 如 o1-preview / gpt-35-turbo
+            base_url=azure_base_url,     # https://xxx.openai.azure.com/
+            api_key=azure_api_key,
+            api_version=api_version,
+            # generation_config=config.generation_config
+        )
     # ✅ OpenAI 模型处理（API Key 模式）
     elif 'openai' in model_type_lower:
         print("Loading OpenAIModel...")
