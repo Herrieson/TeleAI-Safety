@@ -1,0 +1,28 @@
+dataset:
+  type: csv
+  path: benchmark/data/hallucinations/merged/第一部分-法律基础知识-法学基础知识问答.csv
+  task: legal_basics
+  field_map:
+    id: id
+    question: 题目
+    answer: 答案
+
+model:
+  type: azure_openai
+  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  temperature: 0
+  max_tokens: 2048
+
+judge:
+  type: noop
+
+metric:
+  type: aggregate
+
+output_path: benchmark/result/model_only/hallucinations_merged_legal_basics/benchmark_results.jsonl
+summary_path: benchmark/result/model_only/hallucinations_merged_legal_basics/benchmark_summary.json
+progress_bar: true
+num_workers: 32
