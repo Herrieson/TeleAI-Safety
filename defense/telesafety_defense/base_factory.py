@@ -13,11 +13,12 @@ class InputDefender(Defender):
     """Abstract base class for internal defenders that work within the model."""
     
     @abstractmethod
-    def defend(self, messages):
+    def defend(self, model, messages):
         """
         Defend method for internal defenders.
 
         Args:
+            model: The model wrapper used by the pipeline.
             messages (str / list): The input messages to be defended.
 
         Returns:
@@ -44,6 +45,5 @@ class TrainingDefender(Defender):
     """Abstract base class for external defenders that work outside the model."""
     
     @abstractmethod
-    def defend(self, model, messages):
+    def defend(self, model=None, messages=None):
         pass
-

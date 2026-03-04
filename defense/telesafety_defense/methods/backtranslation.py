@@ -8,7 +8,6 @@ Arxiv link: https://arxiv.org/abs/2402.16459
 Source repository: https://github.com/YihanWang617/llm-jailbreaking-defense
 """
 
-from aisafetylab.defense.inference_defense.base_defender import IntraprocessDefender
 from aisafetylab.models import LocalModel, AzureOpenAIModel
 from aisafetylab.evaluation.scorers import PatternScorer
 from aisafetylab.defense.inference_defense.defender_texts import SORRY_RESPONSE, BACK_TRANSLATION_DEFAULT_TEXT
@@ -16,8 +15,9 @@ from loguru import logger
 import math
 import tiktoken
 import re
+from telesafety_defense.base_factory import OutputDefender
 
-class BackTranslationDefender(IntraprocessDefender):
+class BackTranslationDefender(OutputDefender):
     def __init__(self, scorer=PatternScorer(), threshold=-2.0, infer_prompt=BACK_TRANSLATION_DEFAULT_TEXT, model_name="vicuna-13b", model=None, tokenizer=None):
         """
         Args:

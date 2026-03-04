@@ -8,7 +8,6 @@ Arxiv link: https://arxiv.org/abs/2402.13494
 Source repository: https://github.com/xyq7/GradSafe
 """
 
-from aisafetylab.defense.inference_defense.base_defender import IntraprocessDefender
 from aisafetylab.models import LocalModel
 from aisafetylab.defense.inference_defense.defender_texts import (
     SORRY_RESPONSE,
@@ -18,9 +17,10 @@ from aisafetylab.defense.inference_defense.defender_texts import (
 import torch
 import torch.nn.functional as F
 import ast
+from telesafety_defense.base_factory import OutputDefender
 
 
-class GradSafeDefender(IntraprocessDefender):
+class GradSafeDefender(OutputDefender):
     def __init__(
         self,
         unsafe_set=UNSAFE_SET,

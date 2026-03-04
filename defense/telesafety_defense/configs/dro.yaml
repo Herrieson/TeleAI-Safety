@@ -1,5 +1,5 @@
 defender_type: DRO
-model: /gemini/code/tele/models/vicuna-7b-v1.5
+model: ./models/vicuna-7b-v1.5
 model_name: "vicuna-7b-v1.5"
 system_prompt_type: "default"
-chat_template_path: "/gemini/code/telesafety_defense/datasets/chat_templates/vicuna.jinja"
+chat_template_path: "./telesafety_defense/datasets/chat_templates/vicuna.jinja"

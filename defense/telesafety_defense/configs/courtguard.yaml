@@ -1,0 +1,21 @@
+defender_type: CourtGuard
+detector_type: "court"
+guard_action: "block"
+block_message: "Request blocked: suspected prompt injection."
+
+detector_backend:
+  type: "azure_openai"
+  endpoint: "https://<resource>.openai.azure.com"
+  deployment: "<deployment-name>"
+  api_version: "2024-12-01-preview"
+  api_key_env: "AZURE_OPENAI_API_KEY"
+  system_prompt: ""
+
+# Optional. If omitted, uses detector_backend for target generation as well.
+# target_backend:
+#   type: "local_transformers"
+#   model_path: "./models/vicuna-7b-v1.5"
+#   device: "auto"
+#   max_new_tokens: 512
+#   temperature: 0.7
+#   top_p: 0.9

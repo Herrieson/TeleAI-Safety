@@ -1,0 +1,28 @@
+generation:
+  max_new_tokens: 512
+  temperature: 1.0
+  do_sample: false
+
+runtime:
+  log_level: "INFO"
+  batch_size: 4
+  resume: true
+  checkpoint_every: 20
+
+dataset:
+  attack_data_path: "./attack_results"
+  attack_types:
+    - "gcg"
+  target_model: "vicuna-7b-v1.5"
+
+output:
+  save_results_dir: "./telesafety_defense/results"
+
+api:
+  provider: "openai"
+  base_url: "https://api.openai.com/v1"
+  model_name: "gpt-4o-mini"
+  key_env: "OPENAI_API_KEY"
+  timeout: 120
+  allowed_defenders:
+    - "PassThroughDefender"

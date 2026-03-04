@@ -10,7 +10,8 @@ soft_prompt_dir: "dro/trained_prompts"
 log_level: "INFO"
 
 # Attack data configuration
-attack_data_path: "/gemini/code/tele/attack_results"
+# Prefer project-relative paths for portability.
+attack_data_path: "./attack_results"
 attack_types:
   - "gcg"
   # - "past_tense"
@@ -18,9 +19,17 @@ attack_types:
   
 target_model: "vicuna-7b-v1.5"
 
+# API backend (optional, used when defender config does not provide local model/tokenizer)
+# api_base_url: "https://api.openai.com/v1"
+# api_model_name: "gpt-4o-mini"
+# api_key_env: "OPENAI_API_KEY"
+# api_timeout: 120
+
 # Batch processing
 batch_size: 4
 save_results_dir: "./telesafety_defense/results"
+resume: true
+checkpoint_every: 20
 
 # repe     past_tense
 # gradsafe gcg

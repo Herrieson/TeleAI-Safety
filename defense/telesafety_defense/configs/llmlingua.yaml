@@ -1,0 +1,14 @@
+defender_type: LLMLingua
+
+# SecurityLingua / LLMLingua defense model
+defense_model_name: "SecurityLingua/securitylingua-xlm-s2s"
+device_map: "cuda"
+
+# Optional local repo path when llmlingua package is not installed
+# llmlingua_repo_root: "./third_party/LLMLingua-main"
+
+safe_system_prompt: "You are a helpful and safe AI assistant."
+refusal_text: "I'm sorry, I can't help with that."
+
+# If true, fail immediately when LLMLingua cannot be loaded.
+strict_init: false

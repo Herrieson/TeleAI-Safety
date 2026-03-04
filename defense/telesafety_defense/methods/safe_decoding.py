@@ -14,7 +14,7 @@ from collections.abc import Mapping
 
 import torch
 from loguru import logger
-from aisafetylab.defense.inference_defense.base_defender import IntraprocessDefender
+from telesafety_defense.base_factory import OutputDefender
 
 try:
     from aisafetylab.models.local_model import LocalModel as AISafetyLocalModel
@@ -28,7 +28,7 @@ LOCAL_MODEL_TYPES = tuple(
 )
 
 
-class SafeDecodingDefender(IntraprocessDefender):
+class SafeDecodingDefender(OutputDefender):
     """
     Implements the safe decoding defense method by by identifying safety disclaimers and amplifying their token probabilities, while simultaneously attenuating the probabilities of token sequences that are aligned with the objectives of jailbreak attacks. 
         Defend against a potentially unsafe query by performing safe decoding.

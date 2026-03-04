@@ -1,0 +1,33 @@
+# API-only evaluation example
+max_new_tokens: 512
+temperature: 0.7
+do_sample: false
+log_level: "INFO"
+
+attack_data_path: "./attack_results"
+attack_types:
+  - "gcg"
+target_model: "gpt-4o-mini"
+batch_size: 4
+save_results_dir: "./telesafety_defense/results/api"
+resume: true
+checkpoint_every: 20
+
+# OpenAI-compatible API settings
+# provider: openai | azure
+api_provider: "openai"
+api_base_url: "https://api.openai.com/v1"
+api_model_name: "gpt-4o-mini"
+api_key_env: "OPENAI_API_KEY"
+api_timeout: 120
+# Optional override. Default only allows PassThroughDefender in API mode.
+# api_allowed_defenders:
+#   - "PassThroughDefender"
+
+# Azure OpenAI example:
+# api_provider: "azure"
+# api_base_url: "https://<resource>.openai.azure.com"
+# api_deployment: "<deployment-name>"
+# api_version: "2024-12-01-preview"
+# api_model_name: "<deployment-name>"
+# api_key_env: "AZURE_OPENAI_API_KEY"

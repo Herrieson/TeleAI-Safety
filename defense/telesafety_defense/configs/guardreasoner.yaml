@@ -4,7 +4,7 @@
 defender_type: "GuardReasoner"
 
 # Path to the GuardReasoner vLLM checkpoint.
-model_path: "/gemini/space/lxw/GuardReasoner-8B"
+model_path: "./models/GuardReasoner-8B"
 
 # Optional: tweak vLLM sampling.
 sampling_kwargs:

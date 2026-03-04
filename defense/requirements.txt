@@ -1,0 +1,22 @@
+# Core runtime
+pyyaml>=6.0
+loguru>=0.7.2
+tqdm>=4.66.0
+numpy>=1.24
+transformers>=4.40
+torch>=2.1
+safetensors>=0.4
+fastchat>=0.1.0
+
+# Data / training helpers
+datasets>=2.16
+pandas>=2.0
+omegaconf>=2.3
+trl>=0.9
+
+# Optional method dependencies
+tiktoken>=0.7
+vllm>=0.5
+Pillow>=10.0
+openai>=1.30
+python-dotenv>=1.0

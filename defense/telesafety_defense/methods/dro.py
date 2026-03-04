@@ -53,7 +53,7 @@ class DRODefender(InferenceDefender):
             tokenizer.chat_template = open(chat_template_path).read().replace('    ', '').replace('\n', '')
             #print(tokenizer.chat_template)
         else:
-                logger.warning(f"Chat template not found at {chat_template_path}")
+            logger.info("Tokenizer already has chat_template; skip loading {}", chat_template_path)
         
         # Load soft prompt from safetensors
         with safe_open(prompt_path, framework='pt') as f:

@@ -9,16 +9,16 @@ Arxiv link: https://arxiv.org/pdf/2309.02705
 Source repository: https://github.com/aounon/certified-llm-safety
 """
 
-from aisafetylab.defense.inference_defense.base_defender import IntraprocessDefender
 from aisafetylab.models import LocalModel
 from aisafetylab.evaluation.scorers import PatternScorer
 from aisafetylab.defense.inference_defense.defender_texts import SORRY_RESPONSE
 from loguru import logger
 import random
 import tiktoken
+from telesafety_defense.base_factory import OutputDefender
 
 
-class EraseCheckDefender(IntraprocessDefender):
+class EraseCheckDefender(OutputDefender):
     """
     Implements the erase-and-check defense method by progressively truncating the user's input
     from the end and checking if any of the truncated inputs produce harmful responses.
