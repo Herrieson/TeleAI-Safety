@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -113,34 +114,54 @@ class AttackConfig:
 
 
 def parse_attacker_output(text: str) -> Dict[str, str]:
-    def get_content(full_text: str, start_tag: str, terminators: List[str]) -> str:
-        start_pos = full_text.find(start_tag)
-        if start_pos == -1:
-            return ""
-        content_start = start_pos + len(start_tag)
-        earliest_end = len(full_text)
-        for term in terminators:
-            term_pos = full_text.find(term, content_start)
-            if term_pos != -1 and term_pos < earliest_end:
-                earliest_end = term_pos
-        return full_text[content_start:earliest_end].strip()
+    text = text or ""
 
-    think = strategy = prompt = ""
-    if "### `[think]`" in text:
-        think = get_content(text, "### `[think]`", ["### `[strategy]`", "### `[prompt]`"])
-        strategy = get_content(text, "### `[strategy]`", ["### `[prompt]`"])
-        prompt = get_content(text, "### `[prompt]`", [])
-    else:
-        think = get_content(text, "[think]", ["[strategy]", "[prompt]"])
-        strategy = get_content(text, "[strategy]", ["[prompt]"])
-        prompt = get_content(text, "[prompt]", ["[/prompt]"])
+    # Accept common variants such as:
+    # ### `[prompt]`, ### [prompt], **[prompt]**, [PROMPT]:
+    section_pattern = re.compile(
+        r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?`?\[(think|strategy|prompt)\]`?(?:\*\*)?\s*:?\s*$"
+    )
+    matches = list(section_pattern.finditer(text))
 
-    if not prompt and "### `[prompt]`" in text:
-        prompt = text.split("### `[prompt]`", 1)[-1].strip()
+    sections: Dict[str, str] = {"think": "", "strategy": "", "prompt": ""}
+    for i, m in enumerate(matches):
+        name = m.group(1).lower()
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections[name] = text[start:end].strip()
+
+    prompt = sections.get("prompt", "").strip()
     if not prompt:
-        prompt = "parsing_failed"
+        # Legacy fallback for single-line inline markers.
+        lowered = text.lower()
+        marker = "[prompt]"
+        pos = lowered.find(marker)
+        if pos != -1:
+            prompt = text[pos + len(marker):].strip(" \t\r\n:-")
 
-    return {"think": think, "strategy": strategy, "prompt": prompt}
+    if not prompt:
+        # Final fallback: use model raw output instead of a sentinel token.
+        prompt = text.strip()
+
+    return {
+        "think": sections.get("think", ""),
+        "strategy": sections.get("strategy", ""),
+        "prompt": prompt,
+    }
+
+
+def _is_invalid_attacker_prompt(prompt: str) -> bool:
+    p = (prompt or "").strip()
+    if not p:
+        return True
+    lowered = p.lower()
+    bad_tokens = (
+        "[failed to generate response]",
+        "[badrequesterror]",
+        "[filtered by content policy]",
+        "$error$",
+    )
+    return any(tok in lowered for tok in bad_tokens)
 
 
 def build_attacker_context(
@@ -302,7 +323,10 @@ class MorpheusGapFillManager(BaseAttackManager):
             )
             raw_attacker_output = self.attacker_model.chat(messages_for_attacker)
             attacker_output = parse_attacker_output(raw_attacker_output)
-            attacker_prompt = attacker_output.get("prompt", "")
+            attacker_prompt = attacker_output.get("prompt", "").strip()
+            if _is_invalid_attacker_prompt(attacker_prompt):
+                attacker_prompt = attack_goal
+                logger.warning("Attacker output invalid/fallback token; using original attack goal.")
             final_prompt = attacker_prompt
 
             target_messages = build_messages(

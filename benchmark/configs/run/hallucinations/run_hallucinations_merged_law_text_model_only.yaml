@@ -1,0 +1,46 @@
+dataset:
+  type: csv
+  path: benchmark/data/hallucinations/merged/第一部分-法律基础知识-法律条文问答.csv
+  task: law_text
+  field_map:
+    id: id
+    question: 题目
+    answer: 答案
+
+model:
+  type: azure_openai
+  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  temperature: 0
+  max_tokens: 2048
+  token_param: max_completion_tokens
+  system_prompt: |
+    你是法律条文检索助手。只输出与问题对应的法律条文原文。
+    要求：必须与标准答案逐字一致，不得增删改，不得输出任何解释、标点差异、前后缀或多余内容。
+    若不确定也必须只输出你认为的条文原文，不要说明理由。
+
+# vllm 示例
+# model:
+#   type: openai
+#   name: MiniMax-M2.5   
+#   api_key: "EMPTY"                 
+#   base_url: "http://127.0.0.1:8000/v1/chat/completions"
+#   temperature: 0
+#   max_tokens: 2048
+  # system_prompt: |
+  #   你是法律条文检索助手。只输出与问题对应的法律条文原文。
+  #   要求：必须与标准答案逐字一致，不得增删改，不得输出任何解释、标点差异、前后缀或多余内容。
+  #   若不确定也必须只输出你认为的条文原文，不要说明理由。
+
+judge:
+  type: noop
+
+metric:
+  type: aggregate
+
+output_path: benchmark/result/model_only/hallucinations_merged_law_text/benchmark_results.jsonl
+summary_path: benchmark/result/model_only/hallucinations_merged_law_text/benchmark_summary.json
+progress_bar: true
+num_workers: 32

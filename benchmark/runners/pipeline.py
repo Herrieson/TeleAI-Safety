@@ -52,9 +52,7 @@ class BenchmarkPipeline:
             results_by_index = {}
             rows_by_index = {}
             def _process(sample: Sample):
-                response = self.model.generate(sample.question)
-                judge_result = self.judge.score(sample, response)
-                return judge_result, self._build_row(sample, response, judge_result)
+                return self._process_sample(sample)
 
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
                 future_map = {executor.submit(_process, sample): idx for idx, sample in enumerate(dataset_iter)}
@@ -75,10 +73,9 @@ class BenchmarkPipeline:
                 progress_bar.close()
         else:
             for sample in dataset_iter:
-                response = self.model.generate(sample.question)
-                judge_result = self.judge.score(sample, response)
+                judge_result, row = self._process_sample(sample)
                 results.append(judge_result)
-                output_rows.append(self._build_row(sample, response, judge_result))
+                output_rows.append(row)
                 processed += 1
                 if progress_every > 0 and processed % progress_every == 0:
                     print(f"Processed {processed} samples")
@@ -88,6 +85,43 @@ class BenchmarkPipeline:
         if progress_every > 0:
             print(f"Processed {processed} samples (done)")
         return metric_result
+
+    def _process_sample(self, sample: Sample):
+        try:
+            response = self.model.generate(sample.question)
+        except Exception as exc:
+            response = ModelResponse(
+                text="",
+                meta={
+                    "error_stage": "model_generate",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            judge_result = JudgeResult(
+                score=0.0,
+                label="model_error",
+                rationale=str(exc),
+                extra={
+                    "error_stage": "model_generate",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return judge_result, self._build_row(sample, response, judge_result)
+
+        try:
+            judge_result = self.judge.score(sample, response)
+        except Exception as exc:
+            judge_result = JudgeResult(
+                score=0.0,
+                label="judge_error",
+                rationale=str(exc),
+                extra={
+                    "error_stage": "judge_score",
+                    "error_type": type(exc).__name__,
+                },
+            )
+        return judge_result, self._build_row(sample, response, judge_result)
 
     def _infer_progress_total(self):
         dataset_cfg = self.config.get("dataset", {})
@@ -119,6 +153,7 @@ class BenchmarkPipeline:
             "question": sample.question,
             "answer": sample.answer,
             "response": response.text,
+            "response_meta": response.meta,
             "judge": {
                 "score": judge_result.score,
                 "label": judge_result.label,

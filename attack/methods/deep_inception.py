@@ -13,6 +13,7 @@ import sys
 import json
 import time
 import random
+import inspect
 from typing import Optional, List, Dict, Any
 
 # Add current working directory to path for relative imports
@@ -264,7 +265,13 @@ class DeepInceptionManager(BaseAttackManager):
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> 'DeepInceptionManager':
         """Create DeepInceptionManager from configuration dictionary."""
-        return cls(**config)
+        valid_keys = set(inspect.signature(cls.__init__).parameters)
+        valid_keys.discard("self")
+        filtered_config = {k: v for k, v in config.items() if k in valid_keys}
+        ignored_keys = sorted(k for k in config if k not in valid_keys)
+        if ignored_keys:
+            logger.warning(f"Ignoring unsupported config keys: {ignored_keys}")
+        return cls(**filtered_config)
 
 
 def main():
@@ -282,6 +289,7 @@ def main():
         # Backward-compatible key aliases used by other attack configs.
         if "attack_data_path" not in cfg and cfg.get("data_path"):
             cfg["attack_data_path"] = cfg["data_path"]
+        cfg.pop("data_path", None)
         if "evaluator_path" not in cfg and cfg.get("evaluator_model_path"):
             cfg["evaluator_path"] = cfg["evaluator_model_path"]
 

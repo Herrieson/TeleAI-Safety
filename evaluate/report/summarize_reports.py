@@ -10,6 +10,7 @@ REPORT_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr")
 # 评测输入数据通常放在项目根的 results/ 下，也可能在 ../data/attack_results/
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
+ASR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr_labels")
 LONG_CSV = os.path.join(REPORT_DIR, "summary_long.csv")
 WIDE_CSV = os.path.join(REPORT_DIR, "summary_wide.csv")
 MARKDOWN = os.path.join(REPORT_DIR, "summary.md")
@@ -64,6 +65,18 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
         if abs_input.startswith(root + os.sep):
             rel = os.path.relpath(abs_input, root)
             break
+    # ASR 报告通常以 asr_labels/*.jsonl 作为输入，文件名末尾会附带 scorer。
+    # 这里优先按 asr_labels/<model>/<attack>/... 还原成 model/attack。
+    if rel is None:
+        asr_label_root = os.path.abspath(ASR_LABEL_DIR)
+        if abs_input.startswith(asr_label_root + os.sep):
+            rel_labels = os.path.relpath(abs_input, asr_label_root)
+            label_parts = rel_labels.split(os.sep)
+            if len(label_parts) >= 2:
+                model = label_parts[0]
+                attack = label_parts[1]
+                return f"{model}/{attack}", model
+            rel = rel_labels
     if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):

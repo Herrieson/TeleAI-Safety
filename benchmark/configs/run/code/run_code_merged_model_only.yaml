@@ -1,0 +1,40 @@
+dataset:
+  type: csv
+  path: benchmark/data/code/merged.csv
+  task: code_generation
+  field_map:
+    id: 提问
+    question: 提问
+    answer: 模型回答
+
+model:
+  type: azure_openai
+  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  temperature: 0
+  max_tokens: 2048
+  token_param: max_completion_tokens
+  system_prompt: |
+    你是专业的软件工程师。请直接给出可执行、可运行的优化后代码，并简要说明关键修改点。
+
+# vllm 示例
+# model:
+#   type: openai
+#   name: MiniMax-M2.5
+#   api_key: "EMPTY"
+#   base_url: "http://127.0.0.1:8000/v1/chat/completions"
+#   temperature: 0
+#   max_tokens: 2048
+
+judge:
+  type: noop
+
+metric:
+  type: aggregate
+
+output_path: benchmark/result/code_merged/grok-4.1/benchmark_results.jsonl
+summary_path: benchmark/result/code_merged/grok-4.1/benchmark_summary.json
+progress_bar: true
+num_workers: 32
