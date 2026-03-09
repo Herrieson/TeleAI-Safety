@@ -1,0 +1,41 @@
+dataset:
+  type: jsonl
+  path: data/attack_results/gpt-5.2/cipher.jsonl
+  task: redteam_attack
+  field_map:
+    id: id
+    question: final_query
+    answer: response
+
+model:
+  type: azure_openai
+  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+  api_key: "${AZURE_OPENAI_API_KEY}"
+  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "${AZURE_OPENAI_API_VERSION}"
+  temperature: 0
+  max_tokens: 2048
+  token_param: max_completion_tokens
+
+# OpenAI API 示例（按需取消注释，并注释掉上面的 azure_openai 配置）
+# model:
+#   type: openai
+#   name: "gpt-5.2"
+#   api_key: "${OPENAI_API_KEY}"
+#   # 可选：自定义网关地址；直连官方可不填
+#   # base_url: "https://api.openai.com/v1"
+#   temperature: 0
+#   max_tokens: 2048
+#   # 某些模型可能需要 max_completion_tokens
+#   # token_param: max_completion_tokens
+
+judge:
+  type: noop
+
+metric:
+  type: aggregate
+
+output_path: benchmark/result/attack/gpt-5.2/cipher/cipher.jsonl
+summary_path: benchmark/result/attack/gpt-5.2/cipher/cipher_benchmark_summary.json
+progress_bar: true
+num_workers: 32
