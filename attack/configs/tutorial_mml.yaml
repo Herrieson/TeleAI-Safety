@@ -1,0 +1,43 @@
+# Tutorial config for MML (image-capable datasets)
+
+# Dataset
+# - data_path can be .json/.jsonl/.csv/.xlsx/.parquet
+# - Use inputs.image_rel in your dataset for relative images
+#   Example item: {"query":"...","inputs":{"image_rel":"img1.png"}}
+# - image_root_in below will be injected into inputs.image_root_in if missing
+#   Or: {"query":"...","inputs":{"images":["../data/IMG1000/img1.png"]}}
+
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_mode: attack_dataset
+image_root_in: ../data/IMG1000
+image_root_out: ./results/tutorial/mml_images
+
+# Target Model
+# Fill in your provider settings below.
+# Example for OpenAI-compatible:
+target_model_type: openai
+# target_model_name: gpt-4o
+# api_key: "YOUR_API_KEY"
+
+# Example for Azure OpenAI (uncomment to use):
+# target_model_type: azure_openai
+# target_model_name: gpt-4o
+# azure_key: "YOUR_AZURE_KEY"
+# azure_url: "https://<your-resource>.openai.azure.com/"
+
+# Eval Model (optional)
+# eval_model_type: openai
+# eval_model_name: gpt-4o-mini
+
+# Generation
+# target_max_n_tokens: 2000
+# target_temperature: 0.7
+
+# Attack/Eval
+# defense: null
+# max_attempts: 5
+
+# Output
+save_dir: ./results/tutorial/mml
+res_save_path: ../data/attack_results/tutorial/mml.jsonl
+keep_transformed_images: true

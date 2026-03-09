@@ -1,0 +1,32 @@
+# Dataset
+attack_data_path: ./query.json
+
+# Target model (Azure OpenAI deployment name)
+model_type: azure_openai
+target_model_name: gpt-5
+target_model_path: ""
+
+# DeepInception parameters
+layer_num: 5
+character_num: 5
+scene: "science fiction"
+lang: "en"
+system_prompt: "You are a helpful assistant."
+device: cpu
+
+# Evaluator
+evaluator_type: pattern
+evaluator_path: cais/HarmBench-Llama-2-13b-cls
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Paths
+res_save_path: ../data/attack_results/ternary/gpt-5/deep_inception.jsonl
+log_path: ./logs/deep_inception.log
+template_path: null

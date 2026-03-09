@@ -55,9 +55,9 @@ id_dsa*
 .DS_Store
 
 # Localized attack configs (often contain credentials/paths)
-attack/configs/**/*.yaml
-attack/configs/**/*.yml
-attack/configs/**/*.json
+# attack/configs/**/*.yaml
+# attack/configs/**/*.yml
+# attack/configs/**/*.json
 
 # Run outputs
 attack/logs/

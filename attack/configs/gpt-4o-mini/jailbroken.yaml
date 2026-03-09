@@ -1,0 +1,31 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+
+# System prompt for the target model (optional)
+system_prompt: ""
+
+# Attack model (used for generating mutations)
+attack_model_type: azure_openai
+attack_model_name: gpt-4o
+attack_model_path: ""
+attack_model_device: cpu
+
+# Target model (model under test)
+target_model_type: azure_openai
+target_model_name: gpt-4o-mini
+target_model_path: ""
+target_model_device: cpu
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Mutation settings
+mutation_method: combination_3
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o-mini/jailbroken.jsonl

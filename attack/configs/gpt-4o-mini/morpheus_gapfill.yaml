@@ -1,0 +1,39 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+
+# Attacker (Morpheus)
+attacker_model_type: azure_openai
+attacker_model_name: gpt-4o
+attacker_model_path: ""
+
+# Target
+target_model_type: azure_openai
+target_model_name: gpt-4o-mini
+target_model_path: ""
+
+# Judge
+judge_model_type: azure_openai
+judge_model_name: gpt-4o
+judge_model_path: ""
+
+# API / Endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+zhipu_key: null
+
+# Run control
+max_turns: 8
+max_history_turns: 5
+skip_completed: true
+delete_existing_res: false
+
+# Optional system prompt for target
+target_system_prompt: null
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o-mini/morpheus_gapfill.jsonl

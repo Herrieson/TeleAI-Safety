@@ -1,0 +1,38 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+prompt: null
+
+# Rewrite model (for prompt mutations)
+rewrite_model_type: azure_openai
+rewrite_model_name: grok-4-1-fast-non-reasoning
+rewrite_model_path: null
+
+# Judge / eval model
+judge_model_type: azure_openai
+judge_model_name: grok-4-1-fast-non-reasoning
+judge_model_path: null
+
+# Target model (model under test)
+target_model_type: azure_openai
+target_model_name: grok-4-1-fast-non-reasoning
+target_model_path: null
+
+# Generation / runtime
+iter_max: 20
+max_tokens: 3584
+temperature: 0.0
+round_sleep: 1
+fail_sleep: 1
+retry_times: 3
+save_suffix: grok-4.1
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Results
+res_save_path: ../data/attack_results/grok-4.1/rene.jsonl

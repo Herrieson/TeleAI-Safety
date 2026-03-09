@@ -1,0 +1,39 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_mode: attack_dataset
+# dataset: safebench
+# image_format: images_mirror
+# For this dataset, available attack methods: images_mirror, images_rotate, images_base64
+image_root_in: ../data
+image_root_out: ./results/gpt-4o/mml
+
+# Target Model (Azure OpenAI)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Eval Model (Azure OpenAI, optional)
+eval_model_type: azure_openai
+eval_model_name: gpt-4o
+eval_model_path: ""
+
+# Azure settings
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+api_key: null
+base_url: null
+grok_key: null
+grok_url: null
+
+# Generation
+target_max_n_tokens: 2000
+target_temperature: 0.7
+
+# Attack/Eval
+defense: null
+max_attempts: 5
+
+# Output
+# save_dir: ./results/gpt-4o/mml
+res_save_path: ../data/attack_results/gpt-4o/mml.jsonl
+keep_transformed_images: true

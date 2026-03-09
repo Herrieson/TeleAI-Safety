@@ -1,0 +1,51 @@
+# Dataset Configuration
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+
+# Attack Model (used to craft adversarial prompts)
+attack_model_type: azure_openai
+attack_model_name: gpt-4o           # Azure deployment name for GPT-4o
+attack_model_path: ""
+
+# Target Model (the model you want to test)
+target_model_type: azure_openai
+target_model_name: gpt-4o           # Azure deployment name for GPT-4o
+target_model_path: ""
+
+# Evaluation Model (optional; uses PAIR scorer prompt)
+eval_model_type: azure_openai
+eval_model_name: gpt-4o        # Azure deployment name for the eval model
+eval_model_path: ""
+
+# API / Endpoint Settings
+api_key: null                       # Leave null when using Azure
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Generation Hyperparameters
+attack_max_n_tokens: 500
+max_n_attack_attempts: 3
+attack_temperature: 1.0
+attack_top_p: 0.9
+
+target_max_n_tokens: 150
+target_temperature: 1.0
+target_top_p: 1.0
+
+judge_max_n_tokens: 150
+judge_temperature: 1.0
+
+n_streams: 5
+keep_last_n: 3
+n_iterations: 3
+
+devices: "cpu"
+
+# Optional system prompt for the target model (leave empty to skip)
+target_system_prompt: null
+
+# Results
+res_save_path: ../data/attack_results/ternary/gpt-4o/pair.jsonl

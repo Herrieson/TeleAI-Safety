@@ -1,0 +1,26 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+
+# System prompt for target model (optional)
+system_prompt: ""
+
+# Target model (Azure OpenAI deployment name)
+target_model_type: azure_openai
+target_model_name: gpt-5
+target_model_path: ""
+target_model_device: cpu
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# File paths (provide actual files before running)
+prompt_template_path: null
+ascii_dict_path: "./assets/ascii_dict.json"
+
+# Results
+res_save_path: ../data/attack_results/gpt-5/artprompt.jsonl

@@ -1,0 +1,38 @@
+# Dataset
+attack_data_path: ./questions_with_category.json
+
+# Target model (Azure OpenAI deployment name)
+model_type: azure_openai
+target_model_name: gpt-5
+target_model_path: ""
+
+# Detoxify (required for moderation; set to your checkpoint paths)
+# detoxify_model_path: "./detoxify/Detoxify-original.pth"
+detoxify_model_path: null
+# detoxify_config_path: "./detoxify/config_original.json"
+detoxify_config_path: null
+
+# DRA parameters
+iters: 20
+system_prompt: "You are a helpful assistant."
+device: cpu
+default_toxic_trunc: 0.5
+default_benign_trunc: 0.5
+em_t: 0.7
+
+# Evaluator
+evaluator_type: pattern
+evaluator_path: cais/HarmBench-Llama-2-13b-cls
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Paths
+res_save_path: ../data/attack_results/gpt-5/dra.jsonl
+log_path: ./logs/dra.log
+template_path: null
