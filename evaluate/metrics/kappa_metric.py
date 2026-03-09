@@ -18,9 +18,9 @@ class KappaMetricConfig:
 
 class KappaMetric(Metric):
     """
-    Judge consistency via Fleiss' kappa on summary_wide.csv.
-    Each model-attack row is treated as an item, scorers as raters.
-    Labels are derived from ASR >= threshold (unsafe=1, safe=0).
+    Judge consistency via a per-row two-category kappa computed from summary_wide.csv.
+    Each model-attack row is treated as one item with binary labels derived from
+    ASR >= threshold (unsafe=1, safe=0), then row-level kappas are aggregated.
     """
 
     name = "Kappa"
@@ -42,6 +42,7 @@ class KappaMetric(Metric):
         fieldnames = [
             "attack_run",
             "kappa",
+            "definition",
             "raters",
             "unsafe_count",
             "safe_count",
@@ -65,6 +66,7 @@ class KappaMetric(Metric):
                     {
                         "attack_run": row["attack_run"],
                         "kappa": f"{row['kappa']:.6f}",
+                        "definition": "row_level_binary_kappa",
                         "raters": row["raters"],
                         "unsafe_count": row["unsafe"],
                         "safe_count": row["safe"],
@@ -76,6 +78,7 @@ class KappaMetric(Metric):
                 {
                     "attack_run": "__summary__",
                     "kappa": f"{report['avg_kappa']:.6f}",
+                    "definition": "row_level_binary_kappa",
                     "avg_kappa": f"{report['avg_kappa']:.6f}",
                     "median_kappa": f"{report['median_kappa']:.6f}",
                     "min_kappa": f"{report['min_kappa']:.6f}",
@@ -92,6 +95,7 @@ class KappaMetric(Metric):
             writer.writerow(
                 {
                     "attack_run": "__summary__",
+                    "definition": "row_level_binary_kappa",
                     "total_rows": report["total_rows"],
                     "skipped_rows": report["skipped_rows"],
                 }
@@ -137,7 +141,7 @@ class KappaMetric(Metric):
 
                 unsafe_count = sum(1 for v in values if v >= self.threshold)
                 safe_count = len(values) - unsafe_count
-                kappa = self._fleiss_kappa([safe_count, unsafe_count])
+                kappa = self._row_binary_kappa([safe_count, unsafe_count])
                 if kappa is None:
                     skipped_rows += 1
                     continue
@@ -175,7 +179,7 @@ class KappaMetric(Metric):
         return summary
 
     @staticmethod
-    def _fleiss_kappa(counts: List[int]) -> Optional[float]:
+    def _row_binary_kappa(counts: List[int]) -> Optional[float]:
         n = sum(counts)
         if n < 2:
             return None

@@ -9,6 +9,7 @@ from metrics.asr.scorers import *  # noqa: F401,F403 - dynamic lookup
 class ASRMetricConfig:
     scorer_name: str = "PatternScorer"
     config_path: str = "./metrics/asr/config/pattern_scorer.yaml"
+    score_safe_samples: bool = False
 
 
 class ASRMetric(Metric):
@@ -21,6 +22,7 @@ class ASRMetric(Metric):
     def __init__(self, config: ASRMetricConfig):
         self.scorer_name = config.scorer_name
         self.config_path = config.config_path
+        self.score_safe_samples = bool(config.score_safe_samples)
         self.scorer = self._build_scorer()
         # 保持旧版输出命名习惯：文件名用 scorer 名
         self.output_tag = self.scorer_name
@@ -39,9 +41,6 @@ class ASRMetric(Metric):
         safety_label = sample.get("safety_label")
         precomputed_label = sample.get("asr_label")
         precomputed_scorer = sample.get("asr_scorer")
-        if not (isinstance(query, str) and isinstance(response, str)):
-            return MetricUpdate(skipped=1)
-
         # 兼容 response 列表的情况
         if isinstance(response, list) and len(response) == 1:
             response = response[0]
@@ -50,6 +49,8 @@ class ASRMetric(Metric):
 
         if not isinstance(safety_label, int) or safety_label not in (0, 1):
             return MetricUpdate(skipped=1)
+        if safety_label == 0 and not self.score_safe_samples:
+            return MetricUpdate()
 
         if isinstance(precomputed_label, int) and precomputed_label in (0, 1):
             if isinstance(precomputed_scorer, str) and precomputed_scorer != self.scorer_name:

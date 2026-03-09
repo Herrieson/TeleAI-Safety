@@ -7,10 +7,12 @@ from typing import Dict, List, Optional, Tuple
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 REPORT_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr")
+FRR_REPORT_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
 # 评测输入数据通常放在项目根的 results/ 下，也可能在 ../data/attack_results/
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 ASR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr_labels")
+FRR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr_labels")
 LONG_CSV = os.path.join(REPORT_DIR, "summary_long.csv")
 WIDE_CSV = os.path.join(REPORT_DIR, "summary_wide.csv")
 MARKDOWN = os.path.join(REPORT_DIR, "summary.md")
@@ -65,18 +67,18 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
         if abs_input.startswith(root + os.sep):
             rel = os.path.relpath(abs_input, root)
             break
-    # ASR 报告通常以 asr_labels/*.jsonl 作为输入，文件名末尾会附带 scorer。
-    # 这里优先按 asr_labels/<model>/<attack>/... 还原成 model/attack。
+    # ASR/FRR 报告通常以 *_labels/*.jsonl 作为输入，优先还原成 model/attack。
     if rel is None:
-        asr_label_root = os.path.abspath(ASR_LABEL_DIR)
-        if abs_input.startswith(asr_label_root + os.sep):
-            rel_labels = os.path.relpath(abs_input, asr_label_root)
-            label_parts = rel_labels.split(os.sep)
-            if len(label_parts) >= 2:
-                model = label_parts[0]
-                attack = label_parts[1]
-                return f"{model}/{attack}", model
-            rel = rel_labels
+        for label_root in (os.path.abspath(ASR_LABEL_DIR), os.path.abspath(FRR_LABEL_DIR)):
+            if abs_input.startswith(label_root + os.sep):
+                rel_labels = os.path.relpath(abs_input, label_root)
+                label_parts = rel_labels.split(os.sep)
+                if len(label_parts) >= 2:
+                    model = label_parts[0]
+                    attack = label_parts[1]
+                    return f"{model}/{attack}", model
+                rel = rel_labels
+                break
     if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):
@@ -86,6 +88,43 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
     parts = rel_no_ext.split(os.sep)
     attack_group = parts[0] if parts else rel_no_ext
     return rel_no_ext, attack_group
+
+
+def collect_frr_by_run() -> Dict[str, Dict[str, str]]:
+    """
+    Collect FRR report values keyed by attack_run.
+    Returns mapping:
+      attack_run -> {"frr": "...", "safe_total": "...", "skipped": "..."}
+    """
+    if not os.path.isdir(FRR_REPORT_DIR):
+        return {}
+    patterns = {
+        "input_file": r"^Input file:\s*(.+)$",
+        "safe_total": r"^Total safe samples:\s*(\d+)$",
+        "skipped": r"^Skipped samples:\s*(\d+)$",
+        "frr": r"^False Refusal Rate \(FRR\):\s*([0-9.]+)$",
+    }
+    values_by_run: Dict[str, Dict[str, str]] = {}
+    for root, _, files in os.walk(FRR_REPORT_DIR):
+        for fname in files:
+            if not fname.endswith(".txt"):
+                continue
+            path = os.path.join(root, fname)
+            values: Dict[str, str] = {}
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    for key, pat in patterns.items():
+                        if key in values:
+                            continue
+                        m = re.match(pat, line)
+                        if m:
+                            values[key] = m.group(1)
+            if "input_file" not in values or "frr" not in values:
+                continue
+            attack_run, _ = derive_attack_run(values["input_file"])
+            values_by_run[attack_run] = values
+    return values_by_run
 
 
 def collect_reports() -> List[Dict[str, str]]:
@@ -215,6 +254,18 @@ def main() -> None:
     rows = collect_reports()
     if not rows:
         raise SystemExit("No valid report files found.")
+    frr_by_run = collect_frr_by_run()
+    if frr_by_run:
+        for row in rows:
+            frr_values = frr_by_run.get(row["attack_run"])
+            if not frr_values:
+                continue
+            if not row.get("frr"):
+                row["frr"] = frr_values.get("frr", "")
+            if not row.get("safe_samples"):
+                row["safe_samples"] = frr_values.get("safe_total", "")
+            if not row.get("skipped_samples"):
+                row["skipped_samples"] = frr_values.get("skipped", "")
     run_avg_asr = compute_run_avg_asr(rows)
     os.makedirs(REPORT_DIR, exist_ok=True)
     write_long_csv(rows, run_avg_asr)

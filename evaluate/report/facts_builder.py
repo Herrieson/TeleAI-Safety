@@ -12,7 +12,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir
 DEFAULT_SUMMARY_LONG = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "summary_long.csv")
 DEFAULT_SUMMARY_OVERVIEW = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_overview.md")
 DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
-DEFAULT_KAPPA_CSV = os.path.join(PROJECT_ROOT, "evaluation_report", "kappa", "kappa_report.csv")
+DEFAULT_KAPPA_CSV = os.path.join(PROJECT_ROOT, "evaluation_report", "kappa", "kappa_report_kappa.csv")
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 DEFAULT_CM_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "cm")
@@ -354,7 +354,15 @@ def mean_by_model(values: Dict[str, List[float]]) -> Dict[str, float]:
 
 def read_kappa_summary(path: str) -> Optional[Dict[str, object]]:
     if not os.path.isfile(path):
-        return None
+        alt_path = ""
+        if path.endswith("_kappa.csv"):
+            alt_path = path[:-10] + ".csv"
+        elif path.endswith(".csv"):
+            alt_path = path[:-4] + "_kappa.csv"
+        if alt_path and os.path.isfile(alt_path):
+            path = alt_path
+        else:
+            return None
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:

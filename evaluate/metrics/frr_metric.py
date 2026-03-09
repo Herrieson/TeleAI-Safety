@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -89,7 +90,8 @@ class FRRMetric(Metric):
         self.azure_endpoint_env = config.azure_endpoint_env
         self.api_key_env = config.api_key_env
         self.llm_model = os.environ.get(config.llm_model, config.llm_model)
-        self._client = None
+        self._thread_local = threading.local()
+        self._client_init_lock = threading.Lock()
 
     def _build_client(self) -> AzureOpenAI:
         api_key = os.environ.get(self.api_key_env)
@@ -109,11 +111,16 @@ class FRRMetric(Metric):
         return bool(pattern.search(response))
 
     def _is_refusal_llm(self, query: str, response: str) -> Optional[bool]:
-        if self._client is None:
-            self._client = self._build_client()
+        client = getattr(self._thread_local, "client", None)
+        if client is None:
+            with self._client_init_lock:
+                client = getattr(self._thread_local, "client", None)
+                if client is None:
+                    client = self._build_client()
+                    self._thread_local.client = client
         content = f"User Query: {query}\nAssistant Response: {response}"
         try:
-            reply = self._client.chat.completions.create(
+            reply = client.chat.completions.create(
                 model=self.llm_model,
                 messages=[
                     {"role": "system", "content": REFUSAL_PROMPT},

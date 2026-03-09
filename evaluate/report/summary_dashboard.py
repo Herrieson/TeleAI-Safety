@@ -14,7 +14,9 @@ DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
 DEFAULT_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap.png")
 DEFAULT_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png")
 DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png")
-DEFAULT_METRIC_PANEL = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias_wsl_cm.png")
+DEFAULT_BIAS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias.png")
+DEFAULT_WSL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_wsl.png")
+DEFAULT_CM_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_cm.png")
 DEFAULT_MDS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_mds.png")
 DEFAULT_FRR_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models_frr.png")
 DEFAULT_FRR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
@@ -29,7 +31,7 @@ DEFAULT_EXEC_SUMMARY = os.path.join(
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
 DEFAULT_CM_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "cm")
-DEFAULT_KAPPA_CSV = os.path.join(PROJECT_ROOT, "evaluation_report", "kappa", "kappa_report.csv")
+DEFAULT_KAPPA_CSV = os.path.join(PROJECT_ROOT, "evaluation_report", "kappa", "kappa_report_kappa.csv")
 
 
 KNOWN_ATTACKS = [
@@ -86,7 +88,11 @@ def parse_attack_run(attack_run: str) -> Optional[Tuple[str, str]]:
 
 def derive_attack_run(input_file: str) -> Tuple[str, str]:
     abs_input = os.path.abspath(input_file)
-    candidate_roots = [os.path.abspath(RESULTS_DIR), ALT_RESULTS_DIR]
+    candidate_roots = [
+        os.path.abspath(RESULTS_DIR),
+        ALT_RESULTS_DIR,
+        os.path.join(PROJECT_ROOT, "evaluation_report", "frr_labels"),
+    ]
     rel = None
     for root in candidate_roots:
         if abs_input.startswith(root + os.sep):
@@ -99,6 +105,11 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
     else:
         rel_no_ext = os.path.splitext(rel)[0]
     parts = rel_no_ext.split(os.sep)
+    # Canonicalize to model/attack when possible so FRR report keys align with
+    # summary_long.csv attack_run values.
+    if len(parts) >= 2:
+        canonical = os.path.join(parts[0], parts[1])
+        return canonical, parts[0]
     attack_group = parts[0] if parts else rel_no_ext
     return rel_no_ext, attack_group
 
@@ -489,11 +500,11 @@ def generate_plots(
     return created
 
 
-def generate_metric_panel(
+def generate_single_metric_bar(
     labels: List[str],
-    bias_vals: List[float],
-    wsl_vals: List[float],
-    cm_vals: List[float],
+    values: List[float],
+    title: str,
+    cmap_name: str,
     output_path: str,
 ) -> List[str]:
     try:
@@ -507,52 +518,49 @@ def generate_metric_panel(
             "sans-serif",
         ]
     except ImportError:
-        print("matplotlib not available; skipping metric panel plot.")
+        print("matplotlib not available; skipping metric chart.")
         return []
 
-    if not labels or not bias_vals or not wsl_vals or not cm_vals:
+    if not labels or not values:
         return []
 
-    fig_w = max(12.0, len(labels) * 1.1)
-    fig, axes = plt.subplots(1, 3, figsize=(fig_w, 4.8), sharey=False)
-    fig.suptitle("Model Bias / WSL / CM (Avg across attacks)", fontsize=14, fontweight="bold", y=1.02)
+    # Sort each metric chart in ascending order so bars go left->right from small to large.
+    ordered = sorted(zip(labels, values), key=lambda x: x[1])
+    labels = [x[0] for x in ordered]
+    values = [x[1] for x in ordered]
 
-    panels = [
-        ("Bias", bias_vals, "Blues"),
-        ("WSL", wsl_vals, "Oranges"),
-        ("CM", cm_vals, "Greens"),
-    ]
+    fig_w = max(8.0, len(labels) * 1.0)
+    fig, ax = plt.subplots(1, 1, figsize=(fig_w, 5.0))
     x = np.arange(len(labels))
-    for ax, (title, values, cmap_name) in zip(axes, panels):
-        cmap = plt.get_cmap(cmap_name)
-        min_v = min(values)
-        max_v = max(values)
-        if max_v == min_v:
-            colors = [cmap(0.6) for _ in values]
-        else:
-            colors = [cmap(0.3 + 0.5 * ((v - min_v) / (max_v - min_v))) for v in values]
-        bars = ax.bar(x, values, width=0.6, color=colors, alpha=0.95)
-        ax.set_title(title, fontsize=12, fontweight="bold", loc="left", pad=12)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_color("#cccccc")
-        ax.spines["bottom"].set_color("#cccccc")
-        ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.2)
-        ax.set_axisbelow(True)
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height + (0.01 if height >= 0 else -0.01),
-                f"{height:.2f}",
-                ha="center",
-                va="bottom" if height >= 0 else "top",
-                fontsize=8,
-                color="#555555",
-            )
-        ax.set_ylabel("Metric Value", fontsize=10, labelpad=6)
+    cmap = plt.get_cmap(cmap_name)
+    min_v = min(values)
+    max_v = max(values)
+    if max_v == min_v:
+        colors = [cmap(0.6) for _ in values]
+    else:
+        colors = [cmap(0.3 + 0.5 * ((v - min_v) / (max_v - min_v))) for v in values]
+    bars = ax.bar(x, values, width=0.6, color=colors, alpha=0.95)
+    ax.set_title(title, fontsize=14, fontweight="bold", loc="left", pad=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#cccccc")
+    ax.spines["bottom"].set_color("#cccccc")
+    ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.2)
+    ax.set_axisbelow(True)
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + (0.01 if height >= 0 else -0.01),
+            f"{height:.2f}",
+            ha="center",
+            va="bottom" if height >= 0 else "top",
+            fontsize=8,
+            color="#555555",
+        )
+    ax.set_ylabel("Metric Value", fontsize=10, labelpad=6)
 
     fig.tight_layout()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -561,9 +569,11 @@ def generate_metric_panel(
     return [output_path]
 
 
-def generate_metric_panel_from_summary(
+def generate_metric_charts_from_summary(
     metric_summary: List[Dict[str, str]],
-    output_path: str,
+    bias_output_path: str,
+    wsl_output_path: str,
+    cm_output_path: str,
 ) -> List[str]:
     labels: List[str] = []
     bias_vals: List[float] = []
@@ -581,7 +591,35 @@ def generate_metric_panel_from_summary(
     if not labels:
         return []
 
-    return generate_metric_panel(labels, bias_vals, wsl_vals, cm_vals, output_path)
+    created: List[str] = []
+    created.extend(
+        generate_single_metric_bar(
+            labels=labels,
+            values=bias_vals,
+            title="Model Bias (Avg across attacks)",
+            cmap_name="Blues",
+            output_path=bias_output_path,
+        )
+    )
+    created.extend(
+        generate_single_metric_bar(
+            labels=labels,
+            values=wsl_vals,
+            title="Model WSL (Avg across attacks)",
+            cmap_name="Oranges",
+            output_path=wsl_output_path,
+        )
+    )
+    created.extend(
+        generate_single_metric_bar(
+            labels=labels,
+            values=cm_vals,
+            title="Model CM (Avg across attacks)",
+            cmap_name="Greens",
+            output_path=cm_output_path,
+        )
+    )
+    return created
 
 
 def generate_mds_bar(mds_rows: List[Dict[str, str]], output_path: str) -> List[str]:
@@ -1273,13 +1311,27 @@ def write_markdown(
                     **row
                 )
             )
-        metric_panel_path = next(
-            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_METRIC_PANEL)),
+        bias_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_BIAS_BAR)),
             None,
         )
-        if metric_panel_path:
-            rel_metric_panel = os.path.relpath(metric_panel_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Model Bias/WSL/CM Panel]({rel_metric_panel})"])
+        if bias_bar_path:
+            rel_bias = os.path.relpath(bias_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Bias Bar]({rel_bias})"])
+        wsl_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_WSL_BAR)),
+            None,
+        )
+        if wsl_bar_path:
+            rel_wsl = os.path.relpath(wsl_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model WSL Bar]({rel_wsl})"])
+        cm_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_CM_BAR)),
+            None,
+        )
+        if cm_bar_path:
+            rel_cm = os.path.relpath(cm_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model CM Bar]({rel_cm})"])
 
     if radar_paths:
         lines.extend(
@@ -1419,7 +1471,15 @@ def format_model_metric_summary(
 
 def read_kappa_summary(path: str) -> Optional[Dict[str, str]]:
     if not os.path.isfile(path):
-        return None
+        alt_path = ""
+        if path.endswith("_kappa.csv"):
+            alt_path = path[:-10] + ".csv"
+        elif path.endswith(".csv"):
+            alt_path = path[:-4] + "_kappa.csv"
+        if alt_path and os.path.isfile(alt_path):
+            path = alt_path
+        else:
+            return None
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -1449,7 +1509,9 @@ def main() -> None:
     parser.add_argument("--heatmap", default=DEFAULT_HEATMAP, help="Heatmap image path")
     parser.add_argument("--model-bar", default=DEFAULT_MODEL_BAR, help="Model bar chart path")
     parser.add_argument("--attack-bar", default=DEFAULT_ATTACK_BAR, help="Attack bar chart path")
-    parser.add_argument("--metric-panel", default=DEFAULT_METRIC_PANEL, help="Bias/WSL/CM panel chart path")
+    parser.add_argument("--bias-bar", default=DEFAULT_BIAS_BAR, help="Bias bar chart path")
+    parser.add_argument("--wsl-bar", default=DEFAULT_WSL_BAR, help="WSL bar chart path")
+    parser.add_argument("--cm-bar", default=DEFAULT_CM_BAR, help="CM bar chart path")
     parser.add_argument("--mds-bar", default=DEFAULT_MDS_BAR, help="MDS bar chart path")
     parser.add_argument("--frr-bar", default=DEFAULT_FRR_MODEL_BAR, help="FRR model bar chart path")
     parser.add_argument("--frr-dir", default=DEFAULT_FRR_DIR, help="Directory with FRR reports")
@@ -1508,9 +1570,11 @@ def main() -> None:
             os.path.abspath(args.frr_bar),
         )
         plot_paths.extend(
-            generate_metric_panel_from_summary(
+            generate_metric_charts_from_summary(
                 metric_summary,
-                os.path.abspath(args.metric_panel),
+                os.path.abspath(args.bias_bar),
+                os.path.abspath(args.wsl_bar),
+                os.path.abspath(args.cm_bar),
             )
         )
         plot_paths.extend(

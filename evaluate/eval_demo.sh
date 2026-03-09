@@ -231,4 +231,6 @@ uv run python report/summary_dashboard.py
 # 生成结构化事实与深度评测报告（默认不调用 LLM）
 echo "Generating facts and deep report in ${ROOT_DIR}/evaluation_report"
 uv run python report/facts_builder.py
+echo "Exporting all metrics to one file in ${ROOT_DIR}/evaluation_report"
+uv run python report/export_all_metrics.py
 uv run python report/final_report.py --provider azure --model "${AZURE_OPENAI_DEPLOYMENT}"
