@@ -1,0 +1,40 @@
+# Dataset
+data_path: /home/hyx/workplace/TeleAI-Safety/data/img_dataset_b.jsonl
+data_mode: attack_dataset
+dataset: safebench
+image_format: images_mirror
+data_offset: 0
+image_root_in: ../data
+image_root_out: ./results/vllm/gpt-4o/mml
+
+# Target model (Azure OpenAI)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Eval model (optional)
+eval_model_type: azure_openai
+eval_model_name: gpt-4o
+eval_model_path: ""
+
+# API settings
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Generation
+target_max_n_tokens: 2000
+target_temperature: 0.7
+
+# Attack/Eval
+defense: null
+max_attempts: 5
+
+# Output
+save_dir: ./results/vllm/gpt-4o/mml
+res_save_path: ../data/attack_results/vllm/gpt-4o/mml.jsonl
+keep_transformed_images: true
+transformed_save_dir: ./results/vllm/gpt-4o/mml/transformed

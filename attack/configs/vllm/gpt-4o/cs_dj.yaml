@@ -1,0 +1,41 @@
+# CS-DJ multimodal attack config for Azure OpenAI
+# Note: current runnable script is methods/todo/yuer/CS-DJ-merge.py
+
+jailbreak_folder_path: null
+data_path: /home/hyx/workplace/TeleAI-Safety/data/img_dataset_b.jsonl
+data_offset: 0
+image_root_in: /home/hyx/workplace/TeleAI-Safety/data
+image_root_out: ./results/vllm/gpt-4o/cs_dj_images
+keep_transformed_images: true
+
+src_dir: /home/hyx/workplace/TeleAI-Safety/data/无风险_img500
+save_embeding_path: ./cache/vllm/gpt-4o/cs_dj/image_embedding
+save_map_path: ./cache/vllm/gpt-4o/cs_dj/image_map
+jailbreak_response_save_path: ./results/vllm/gpt-4o/cs_dj_detail
+distraction_image_save_path: ./results/vllm/gpt-4o/cs_dj_images
+strategy_name: CS-DJ_best_method
+seed: 0
+num_images: 100
+object_model: gpt-4o
+
+split_model_name: Qwen/Qwen2.5-3B-Instruct
+split_max_new_tokens: 200
+split_temperature: 1.0
+
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+target_max_n_tokens: 1000
+target_temperature: 0.1
+target_top_p: 1.0
+target_system_prompt: ""
+
+res_save_path: ../data/attack_results/vllm/gpt-4o/cs_dj.jsonl

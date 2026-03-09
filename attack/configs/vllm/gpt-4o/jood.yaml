@@ -1,0 +1,28 @@
+data_path: /home/hyx/workplace/TeleAI-Safety/data/img_dataset_b.jsonl
+data_offset: 0
+image_root_in: /home/hyx/workplace/TeleAI-Safety/data
+image_root_out: ./results/vllm/gpt-4o/jood_images
+keep_transformed_images: true
+
+harmless_image_dir: /home/hyx/workplace/TeleAI-Safety/data/无风险_img500
+
+aug: mixup
+lams: [0.0, 0.5, 1.0]
+
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+target_max_n_tokens: 2048
+target_temperature: 0.0
+target_top_p: 1.0
+target_system_prompt: ""
+
+res_save_path: ../data/attack_results/vllm/gpt-4o/jood.jsonl
