@@ -24,22 +24,16 @@ SAVE_INTERVAL="${SAVE_INTERVAL:-60}"
 METHOD_PARALLEL="${METHOD_PARALLEL:-2}"
 SKIP_COMPLETED="${SKIP_COMPLETED:-1}"
 RESULT_MIN_LINES="${RESULT_MIN_LINES:-}"
-RESULTS_ROOT="${RESULTS_ROOT:-${ROOT_DIR}/../data/attack_results}"
-if [[ "${RESULTS_ROOT}" != /* ]]; then
-  RESULTS_ROOT="${ROOT_DIR}/${RESULTS_ROOT}"
-fi
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
-MANIFEST_PATH="${MANIFEST_PATH:-${RESULTS_ROOT}/manifests/${CONFIG_TAG}_${RUN_ID}.txt}"
+MANIFEST_ROOT="${MANIFEST_ROOT:-${ROOT_DIR}/../data/attack_results/manifests}"
+if [[ "${MANIFEST_ROOT}" != /* ]]; then
+  MANIFEST_ROOT="${ROOT_DIR}/${MANIFEST_ROOT}"
+fi
+MANIFEST_PATH="${MANIFEST_PATH:-${MANIFEST_ROOT}/${CONFIG_TAG}_${RUN_ID}.txt}"
 failed_methods=()
 declare -a running_pids=()
 declare -a running_methods=()
 declare -a manifest_results=()
-TMP_CFG_DIR="$(mktemp -d -t attack_cfg_XXXXXX)"
-
-cleanup() {
-  rm -rf "${TMP_CFG_DIR}"
-}
-trap cleanup EXIT
 
 if command -v uv >/dev/null 2>&1; then
   PY_CMD=(uv run python)
@@ -52,23 +46,26 @@ else
   exit 1
 fi
 
-rewrite_config_res_path() {
+get_res_save_path() {
   local cfg_path="$1"
-  local out_path="$2"
-  local res_save_path="$3"
-  CFG_PATH="$cfg_path" OUT_PATH="$out_path" RES_SAVE_PATH="$res_save_path" "${PY_CMD[@]}" - <<'PY'
+  CFG_PATH="$cfg_path" ROOT_DIR="$ROOT_DIR" "${PY_CMD[@]}" - <<'PY'
 import os
 import yaml
 from pathlib import Path
 
 cfg_path = Path(os.environ["CFG_PATH"])
+root = Path(os.environ["ROOT_DIR"])
 with cfg_path.open("r", encoding="utf-8") as f:
     data = yaml.safe_load(f) or {}
-data["res_save_path"] = str(Path(os.environ["RES_SAVE_PATH"]))
-out_path = Path(os.environ["OUT_PATH"])
-out_path.parent.mkdir(parents=True, exist_ok=True)
-with out_path.open("w", encoding="utf-8") as f:
-    yaml.safe_dump(data, f, sort_keys=False, allow_unicode=False)
+res = data.get("res_save_path")
+if not res:
+    print("")
+else:
+    res = os.path.expandvars(str(res))
+    p = Path(res)
+    if not p.is_absolute():
+        p = root / p
+    print(str(p))
 PY
 }
 
@@ -200,12 +197,14 @@ for cfg in "${config_files[@]}"; do
     continue
   fi
 
-  res_path="${RESULTS_ROOT}/${CONFIG_TAG}/${method_name}.jsonl"
-  patched_cfg="${TMP_CFG_DIR}/${method_name}.yaml"
-  rewrite_config_res_path "$cfg" "$patched_cfg" "$res_path"
+  res_path="$(get_res_save_path "$cfg")"
+  if [[ -z "${res_path}" ]]; then
+    echo "[skip] method=${method_name} missing res_save_path in config: ${cfg}" >&2
+    continue
+  fi
   manifest_results+=("$res_path")
 
-  expected_count="$(get_expected_records "$patched_cfg")"
+  expected_count="$(get_expected_records "$cfg")"
   existing_count="$(count_result_records "$res_path")"
   target_count=0
   if [[ "$expected_count" =~ ^[0-9]+$ ]] && ((expected_count > 0)); then
@@ -222,7 +221,7 @@ for cfg in "${config_files[@]}"; do
   echo "[run] method=${method_name} config=${cfg} shards=${SHARDS} workers=${MAX_WORKERS} save_interval=${SAVE_INTERVAL}"
   "${PY_CMD[@]}" "$PARALLEL_SCRIPT" \
     --method "$method_path" \
-    --config "$patched_cfg" \
+    --config "$cfg" \
     --shards "$SHARDS" \
     --max-workers "$MAX_WORKERS" \
     --progress-interval "$PROGRESS_INTERVAL" \
