@@ -9,12 +9,20 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
 
 ASR_ROOT="${ROOT_DIR}/metrics/asr"
-RESULTS_DIR="${ROOT_DIR}/../data/attack_results"
-OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/asr"
-FRR_OUTPUT_ROOT="${ROOT_DIR}/evaluation_report/frr"
-ASR_LABEL_ROOT="${ROOT_DIR}/evaluation_report/asr_labels"
-FRR_LABEL_ROOT="${ROOT_DIR}/evaluation_report/frr_labels"
-TERNARY_LABEL_ROOT="${ROOT_DIR}/evaluation_report/ternary_labels"
+RESULTS_DIR="${RESULTS_DIR:-${ROOT_DIR}/../data/attack_results}"
+RESULT_MANIFEST="${RESULT_MANIFEST:-}"
+EVAL_FILE_PARALLEL="${EVAL_FILE_PARALLEL:-4}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT_DIR}/evaluation_report/asr}"
+FRR_OUTPUT_ROOT="${FRR_OUTPUT_ROOT:-${ROOT_DIR}/evaluation_report/frr}"
+ASR_LABEL_ROOT="${ASR_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/asr_labels}"
+FRR_LABEL_ROOT="${FRR_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/frr_labels}"
+TERNARY_LABEL_ROOT="${TERNARY_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/ternary_labels}"
+if [[ "${RESULTS_DIR}" != /* ]]; then
+  RESULTS_DIR="${ROOT_DIR}/${RESULTS_DIR}"
+fi
+if [[ ! "${EVAL_FILE_PARALLEL}" =~ ^[0-9]+$ ]] || ((EVAL_FILE_PARALLEL < 1)); then
+  EVAL_FILE_PARALLEL=1
+fi
 
 # 默认 scorer 列表（按需扩展）
 DEFAULT_SCORERS=("PatternScorer" "PrefixMatchScorer" "ClassficationScorer" "GPTScorer" "GPT5Scorer" "DSV3Scorer" "DSR1Scorer" "MultiAPIScorer")
@@ -37,21 +45,50 @@ declare -A CONFIG_MAP=(
   ["MultiAPIScorer"]="${ASR_ROOT}/config/multi_api_scorer.yaml"
 )
 
-mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" | sort)
-if [[ ${#result_files[@]} -eq 0 ]]; then
-  echo "No jsonl files found in ${RESULTS_DIR}" >&2
-  exit 1
+if [[ -n "${RESULT_MANIFEST}" ]]; then
+  if [[ ! -f "${RESULT_MANIFEST}" ]]; then
+    echo "Result manifest not found: ${RESULT_MANIFEST}" >&2
+    exit 1
+  fi
+  echo "Loading result files from manifest ${RESULT_MANIFEST}"
+  mapfile -t result_files < "${RESULT_MANIFEST}"
+else
+  mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" | sort)
+  if [[ ${#result_files[@]} -eq 0 ]]; then
+    echo "No jsonl files found in ${RESULTS_DIR}" >&2
+    exit 1
+  fi
 fi
 
+declare -A seen_result_files=()
 filtered_result_files=()
 for json_path in "${result_files[@]}"; do
+  json_path="${json_path%$'\r'}"
+  if [[ -z "${json_path}" ]]; then
+    continue
+  fi
+  if [[ "${json_path}" != /* ]]; then
+    json_path="${ROOT_DIR}/${json_path}"
+  fi
+  if [[ ! -f "${json_path}" ]]; then
+    echo "Skip missing result file: ${json_path}" >&2
+    continue
+  fi
   if [[ "$(basename "${json_path}")" == "any.jsonl" ]]; then
     continue
   fi
+  if [[ -n "${seen_result_files[${json_path}]:-}" ]]; then
+    continue
+  fi
+  seen_result_files["${json_path}"]=1
   filtered_result_files+=("${json_path}")
 done
 if [[ ${#filtered_result_files[@]} -eq 0 ]]; then
-  echo "No jsonl files found in ${RESULTS_DIR} after excluding placeholder any.jsonl" >&2
+  if [[ -n "${RESULT_MANIFEST}" ]]; then
+    echo "No valid jsonl files found in manifest ${RESULT_MANIFEST}" >&2
+  else
+    echo "No jsonl files found in ${RESULTS_DIR} after excluding placeholder any.jsonl" >&2
+  fi
   exit 1
 fi
 
@@ -63,18 +100,23 @@ mkdir -p "${TERNARY_LABEL_ROOT}"
 
 FRR_MODE="${EVAL_FRR_MODE:-llm}"
 
-for json_path in "${filtered_result_files[@]}"; do
+process_one_result_file() {
+  local json_path="$1"
   # 相对 results 的子路径（去掉扩展）
-  rel_path="${json_path#${RESULTS_DIR}/}"
-  rel_no_ext="${rel_path%.jsonl}"
-  output_dir="${OUTPUT_ROOT}/${rel_no_ext}"
-  asr_label_dir="${ASR_LABEL_ROOT}/${rel_no_ext}"
+  local rel_path="${json_path#${RESULTS_DIR}/}"
+  if [[ "${rel_path}" == "${json_path}" ]]; then
+    rel_path="$(basename "${json_path}")"
+  fi
+  local rel_no_ext="${rel_path%.jsonl}"
+  local output_dir="${OUTPUT_ROOT}/${rel_no_ext}"
+  local asr_label_dir="${ASR_LABEL_ROOT}/${rel_no_ext}"
+  local base_name
   base_name="$(basename "${rel_no_ext}")"
   mkdir -p "${output_dir}"
   mkdir -p "${asr_label_dir}"
 
   for scorer in "${SCORERS[@]}"; do
-    cfg="${CONFIG_MAP[${scorer}]:-}"
+    local cfg="${CONFIG_MAP[${scorer}]:-}"
     if [[ -z "${cfg}" ]]; then
       echo "Skip ${scorer}: no config mapping" >&2
       continue
@@ -83,9 +125,9 @@ for json_path in "${filtered_result_files[@]}"; do
       echo "Skip ${scorer}: config not found ${cfg}" >&2
       continue
     fi
-    out_path="${output_dir}/${base_name}.txt"
-    asr_label_path="${asr_label_dir}/${base_name}_${scorer}.jsonl"
-    report_exists=0
+    local out_path="${output_dir}/${base_name}.txt"
+    local asr_label_path="${asr_label_dir}/${base_name}_${scorer}.jsonl"
+    local report_exists=0
     if compgen -G "${output_dir}/*_${scorer}.txt" > /dev/null; then
       report_exists=1
     fi
@@ -93,6 +135,7 @@ for json_path in "${filtered_result_files[@]}"; do
       echo "Skip ${scorer} on ${rel_path}: report and labels already exist"
       continue
     fi
+    local metric_args_json
     metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s"}}' "${scorer}" "${cfg}")
     if [[ ! -f "${asr_label_path}" ]]; then
       echo "Annotating ${scorer} on ${rel_path} -> ${asr_label_path}"
@@ -115,21 +158,22 @@ for json_path in "${filtered_result_files[@]}"; do
       --output_path="${out_path}"
   done
 
-  frr_out_dir="${FRR_OUTPUT_ROOT}/${rel_no_ext}"
-  frr_label_dir="${FRR_LABEL_ROOT}/${rel_no_ext}"
+  local frr_out_dir="${FRR_OUTPUT_ROOT}/${rel_no_ext}"
+  local frr_label_dir="${FRR_LABEL_ROOT}/${rel_no_ext}"
   mkdir -p "${frr_out_dir}"
   mkdir -p "${frr_label_dir}"
-  frr_out_path="${frr_out_dir}/${base_name}_frr.txt"
-  frr_label_path="${frr_label_dir}/${base_name}_frr_${FRR_MODE}.jsonl"
-  legacy_frr_out_path="${frr_out_dir}/${base_name}.txt"
-  frr_report_exists=0
+  local frr_out_path="${frr_out_dir}/${base_name}_frr.txt"
+  local frr_label_path="${frr_label_dir}/${base_name}_frr_${FRR_MODE}.jsonl"
+  local legacy_frr_out_path="${frr_out_dir}/${base_name}.txt"
+  local frr_report_exists=0
   if compgen -G "${frr_out_dir}/*_frr.txt" > /dev/null || [[ -f "${legacy_frr_out_path}" ]]; then
     frr_report_exists=1
   fi
   if [[ ${frr_report_exists} -eq 1 && -f "${frr_label_path}" ]]; then
     echo "Skip FRR on ${rel_path}: report and labels already exist"
-    continue
+    return 0
   fi
+  local frr_args_json
   frr_args_json=$(printf '{"FRR":{"mode":"%s"}}' "${FRR_MODE}")
   if [[ ! -f "${frr_label_path}" ]]; then
     echo "Annotating FRR(${FRR_MODE}) on ${rel_path} -> ${frr_label_path}"
@@ -142,14 +186,53 @@ for json_path in "${filtered_result_files[@]}"; do
   fi
   if [[ ${frr_report_exists} -eq 1 ]]; then
     echo "Skip FRR report on ${rel_path}: output already exists"
-    continue
+    return 0
   fi
   uv run python evaluate_metrics.py \
     --metrics="FRR" \
     --metric_args="${frr_args_json}" \
     --json_path="${frr_label_path}" \
     --output_path="${frr_out_path}"
+}
+
+declare -a running_pids=()
+declare -a running_files=()
+declare -a failed_files=()
+
+wait_one_eval_slot() {
+  local pid="${running_pids[0]}"
+  local file_path="${running_files[0]}"
+  local rc=0
+  if ! wait "${pid}"; then
+    rc=$?
+  fi
+  running_pids=("${running_pids[@]:1}")
+  running_files=("${running_files[@]:1}")
+  if ((rc == 0)); then
+    echo "[ok] eval ${file_path}"
+  else
+    echo "[fail] eval ${file_path}" >&2
+    failed_files+=("${file_path}")
+  fi
+}
+
+for json_path in "${filtered_result_files[@]}"; do
+  process_one_result_file "${json_path}" &
+  running_pids+=("$!")
+  running_files+=("${json_path}")
+  while ((${#running_pids[@]} >= EVAL_FILE_PARALLEL)); do
+    wait_one_eval_slot
+  done
 done
+
+while ((${#running_pids[@]} > 0)); do
+  wait_one_eval_slot
+done
+
+if ((${#failed_files[@]} > 0)); then
+  echo "Evaluation failed for files: ${failed_files[*]}" >&2
+  exit 1
+fi
 
 # 生成所有模型的 MDS 汇总报告（基于 ASR evaluation_report 目录）
 MDS_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/mds"
@@ -178,19 +261,21 @@ uv run python evaluate_metrics.py \
   --output_path="${KAPPA_OUTPUT_PATH}"
 
 # 标注三分类标签
-TERNARY_DIR="${RESULTS_DIR}"
-if [[ -d "${TERNARY_DIR}" ]]; then
+if [[ ${#filtered_result_files[@]} -gt 0 ]]; then
   if [[ -z "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
     echo "AZURE_OPENAI_DEPLOYMENT is required for ternary labeling." >&2
     exit 1
   fi
-  mapfile -t ternary_files < <(find "${TERNARY_DIR}" -type f -name "*.jsonl" | sort)
+  ternary_files=("${filtered_result_files[@]}")
   if [[ ${#ternary_files[@]} -eq 0 ]]; then
-    echo "No ternary jsonl files found in ${TERNARY_DIR}" >&2
+    echo "No ternary jsonl files found" >&2
   else
-    echo "Running ternary labeling in ${TERNARY_DIR}"
+    echo "Running ternary labeling on ${#ternary_files[@]} files"
     for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${TERNARY_DIR}/}"
+      rel_path="${json_path#${RESULTS_DIR}/}"
+      if [[ "${rel_path}" == "${json_path}" ]]; then
+        rel_path="$(basename "${json_path}")"
+      fi
       ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
       ternary_label_dir="$(dirname "${ternary_label_path}")"
       mkdir -p "${ternary_label_dir}"
@@ -205,19 +290,28 @@ if [[ -d "${TERNARY_DIR}" ]]; then
     done
     echo "Running bias metrics in ${TERNARY_LABEL_ROOT}" # 计算 bias
     for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${TERNARY_DIR}/}"
+      rel_path="${json_path#${RESULTS_DIR}/}"
+      if [[ "${rel_path}" == "${json_path}" ]]; then
+        rel_path="$(basename "${json_path}")"
+      fi
       ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
       uv run python metrics/bias_metrics.py --input "${ternary_label_path}"
     done
     echo "Running WSL metrics in ${TERNARY_LABEL_ROOT}" # 计算加权安全损失
     for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${TERNARY_DIR}/}"
+      rel_path="${json_path#${RESULTS_DIR}/}"
+      if [[ "${rel_path}" == "${json_path}" ]]; then
+        rel_path="$(basename "${json_path}")"
+      fi
       ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
       uv run python metrics/wsl_metrics.py --input "${ternary_label_path}"
     done
     echo "Running cost matrix metrics in ${TERNARY_LABEL_ROOT}" # 计算代价矩阵
     for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${TERNARY_DIR}/}"
+      rel_path="${json_path#${RESULTS_DIR}/}"
+      if [[ "${rel_path}" == "${json_path}" ]]; then
+        rel_path="$(basename "${json_path}")"
+      fi
       ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
       uv run python metrics/cm_metrics.py --input "${ternary_label_path}"
     done
