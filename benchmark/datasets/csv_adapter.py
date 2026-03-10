@@ -9,6 +9,7 @@ class CsvAdapter(DatasetAdapter):
     def load(self) -> Iterable[Sample]:
         path = self.config["path"]
         task = self.config.get("task", "default")
+        task_field = self.config.get("task_field")
         field_map = self.config.get(
             "field_map",
             {"id": "id", "question": "question", "answer": "answer", "meta": "meta"},
@@ -20,9 +21,10 @@ class CsvAdapter(DatasetAdapter):
                 question = row.get(field_map["question"], "")
                 answer = row.get(field_map["answer"], "")
                 meta = row.get(field_map.get("meta", "meta"), {})
+                row_task = row.get(task_field, task) if task_field else row.get("task", task)
                 yield Sample(
                     id=sample_id,
-                    task=row.get("task", task),
+                    task=row_task,
                     question=question,
                     answer=answer,
                     meta=meta,

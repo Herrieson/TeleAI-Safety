@@ -1,23 +1,24 @@
 dataset:
-  type: csv
-  path: benchmark/data/hallucinations/merged/第一部分-法律基础知识-法学基础知识问答.csv
+  type: jsonl
+  # 示例：
+  # export INPUT_RESULTS_JSONL="benchmark/result/hallucinations/gpt-5/hallucinations_merged_legal_basics/benchmark_results.jsonl"
+  path: "${INPUT_RESULTS_JSONL}"
   task: legal_basics
   field_map:
     id: id
-    question: 题目
-    answer: 答案
+    question: response
+    answer: answer
+    # 保存原始题目，供 judge 使用
+    meta: question
 
 model:
-  type: azure_openai
-  deployment: "${AZURE_OPENAI_DEPLOYMENT}"
-  api_key: "${AZURE_OPENAI_API_KEY}"
-  azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
-  api_version: "${AZURE_OPENAI_API_VERSION}"
-  temperature: 0
-  max_tokens: 2048
+  type: local
+  mode: echo
 
 judge:
   type: llm
+  max_parse_retries: 10
+  parse_retry_sleep_seconds: 1
   model:
     type: azure_openai
     deployment: "${AZURE_OPENAI_DEPLOYMENT}"
@@ -34,7 +35,7 @@ judge:
     你是一个司法考试中的判卷老师，需要判断回答是否正确，返回一个0-100的百分制得分。
     评分标准：按照回答中覆盖的答案要点进行判断；答错、漏答扣分；超出答案要点不扣分。
 
-    题目:"{question}"
+    题目:"{meta}"
     回答:"{response}"
     标准答案:"{answer}"
 
@@ -43,7 +44,7 @@ judge:
 metric:
   type: aggregate
 
-output_path: benchmark/result/hallucinations_merged_legal_basics/benchmark_results.jsonl
-summary_path: benchmark/result/hallucinations_merged_legal_basics/benchmark_summary.json
+output_path: benchmark/result/eval_from_result/hallucinations_legal_basics/benchmark_results.jsonl
+summary_path: benchmark/result/eval_from_result/hallucinations_legal_basics/benchmark_summary.json
 progress_bar: true
 num_workers: 32
