@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from typing import Any, Dict
 
 import yaml
@@ -6,7 +7,30 @@ try:
     from loguru import logger
 except ImportError:
     import logging
-    logger = logging.getLogger(__name__)
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
 
 from telesafety_defense.defender_registry import resolve_defender_class
 
@@ -85,6 +109,31 @@ def _inject_hf_assets_if_needed(defender_type: str, defender_params: Dict[str, A
     return defender_params
 
 
+def _resolve_top_level_env_overrides(defender_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Resolve top-level `*_env` entries by reading environment variables.
+    Example:
+      checkpoint_path_env: "JAILDAM_CHECKPOINT_PATH"
+      -> checkpoint_path: os.getenv("JAILDAM_CHECKPOINT_PATH")
+    """
+    resolved = dict(defender_params)
+    for key, env_name in list(defender_params.items()):
+        if not key.endswith("_env"):
+            continue
+        if not isinstance(env_name, str) or not env_name.strip():
+            continue
+        value_key = key[: -len("_env")]
+        current = resolved.get(value_key)
+        if current is None or (isinstance(current, str) and current.strip() == ""):
+            env_value = os.getenv(env_name.strip())
+            if env_value not in (None, ""):
+                resolved[value_key] = env_value
+        # Top-level `*_env` is only for config resolution and should not be passed
+        # into defender constructors unless explicitly supported in nested structures.
+        resolved.pop(key, None)
+    return resolved
+
+
 def create_defender(defender_type: str, **kwargs):
     defender_class = resolve_defender_class(defender_type)
     try:
@@ -99,6 +148,7 @@ def create_defender_from_config(config: Dict[str, Any]):
         raise ValueError("YAML configuration must include 'defender_type'.")
 
     defender_params = {k: v for k, v in config.items() if k != "defender_type"}
+    defender_params = _resolve_top_level_env_overrides(defender_params)
     if defender_type == "BackdoorEnhancedAlignment":
         defender_params = _prepare_backdooralign_assets(defender_params)
     defender_params = _inject_hf_assets_if_needed(defender_type, defender_params)

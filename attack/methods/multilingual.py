@@ -7,37 +7,38 @@ to bypass safety mechanisms in language models.
 
 import os
 import sys
-import json
-import time
-import random
 from typing import Optional, List, Dict, Any
 
 # Add current working directory to path for relative imports
 sys.path.append(os.getcwd())
 
-# Third-party imports
-import torch
 from tqdm import tqdm
 from loguru import logger
 from dataclasses import dataclass
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Local imports
 from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
-from models import load_model, FORMATTER_REGISTRY, DefaultFormatter
+from models import load_model
 from logger import setup_logger
 from mutation import Translate
+from utils.message_builder import build_messages
 
 @dataclass
 class MultilingualConfig:
     """Configuration class for Multilingual attack parameters."""
-    attack_data_path: str
-    target_model_path: str  
-    target_model_name: str
-    model_type: str = 'local'  # openai, azure, local
+    data_path: Optional[str] = None
+    attack_data_path: Optional[str] = None
+    data_offset: int = 0
+    image_root_in: Optional[str] = None
+
+    target_model_path: str = ""
+    target_model_name: str = ""
+    target_model_type: str = 'local'  # openai, azure, local
+    model_type: Optional[str] = None  # backward-compatible alias
     mutation_method: str = 'zh-CN'
     system_prompt: str = 'You are a helpful assistant.'
+    target_system_prompt: Optional[str] = None
     device: str = 'cuda'
     
     # API keys for different services
@@ -47,58 +48,13 @@ class MultilingualConfig:
     azure_url: str = ''  # Azure endpoint URL
     grok_key: str = ''  # Grok API key  
     grok_url: str = ''  # Grok endpoint URL
+
+    target_max_n_tokens: int = 512
+    target_temperature: float = 0.7
+    target_top_p: float = 1.0
     
     res_save_path: Optional[str] = None
     log_path: Optional[str] = None
-
-
-class ModelInitializer:
-    """Handles model and tokenizer initialization."""
-    
-    def __init__(self, config: MultilingualConfig) -> None:
-        """Initialize model components with configuration."""
-        self.config = config
-        self.model, self.tokenizer = self._load_model_and_tokenizer()
-        logger.info("Model and tokenizer initialized successfully")
-    
-    def _load_model_and_tokenizer(self):
-        """Load model and tokenizer based on configuration."""
-        try:
-            # Load model
-            model = AutoModelForCausalLM.from_pretrained(
-                self.config.target_model_path,
-                device_map="auto"
-            ).eval()
-            
-            # Load tokenizer
-            tokenizer = self._load_tokenizer()
-            
-            # Set pad token if not exists
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-                tokenizer.pad_token_id = tokenizer.eos_token_id
-                
-            return model, tokenizer
-            
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            raise
-    
-    def _load_tokenizer(self):
-        """Load tokenizer with fallback mechanism."""
-        tokenizer_path = self.config.target_model_path
-        tokenizer_files = ["tokenizer_config.json", "tokenizer.model", "vocab.json", "merges.txt"]
-        has_tokenizer = any(os.path.exists(os.path.join(tokenizer_path, f)) for f in tokenizer_files)
-
-        if has_tokenizer:
-            logger.info(f"Loading local tokenizer: {tokenizer_path}")
-            return AutoTokenizer.from_pretrained(tokenizer_path)
-        else:
-            logger.warning(f"Local tokenizer doesn't exist, downloading from HuggingFace: {self.config.target_model_name}")
-            return AutoTokenizer.from_pretrained(
-                "meta-llama/Meta-Llama-3-70B-Instruct",
-                use_auth_token=""
-            )
 
 
 class TranslationHandler:
@@ -146,51 +102,6 @@ class TranslationHandler:
             return [query]  # Return original query if translation fails
 
 
-class PromptFormatter:
-    """Formats prompts for the multilingual attack."""
-    
-    @staticmethod
-    def format_messages(target_model, system_prompt: str, raw_query: str) -> str:
-        """Format the query with system prompt and conversation template."""
-        # Check if model supports conversation interface
-        if hasattr(target_model, "conversation") and hasattr(target_model.conversation, "append_message"):
-            # Use conversation mechanism
-            target_model.conversation.messages = []
-            if system_prompt:
-                target_model.conversation.set_system_message(system_prompt)
-            conv_template = target_model.conversation
-            conv_template.append_message(conv_template.roles[0], raw_query)
-            
-            # Check if conversation has get_prompt method (fastchat style)
-            if hasattr(conv_template, "get_prompt"):
-                prompt = conv_template.get_prompt()
-                return prompt
-            # Check if conversation has to_openai_api_messages method (OpenAI/Azure style)
-            elif hasattr(conv_template, "to_openai_api_messages"):
-                messages = conv_template.to_openai_api_messages()
-                # Convert messages to a simple prompt format
-                prompt_parts = []
-                for msg in messages:
-                    if msg['role'] == 'system':
-                        prompt_parts.append(f"System: {msg['content']}")
-                    elif msg['role'] == 'user':
-                        prompt_parts.append(f"User: {msg['content']}")
-                    elif msg['role'] == 'assistant':
-                        prompt_parts.append(f"Assistant: {msg['content']}")
-                prompt = "\n".join(prompt_parts)
-                return prompt
-            else:
-                # Fallback if no known method exists
-                if system_prompt:
-                    return system_prompt + "\n" + raw_query
-                return raw_query
-        else:
-            # Fallback: handle models without conversation interface
-            if system_prompt:
-                return system_prompt + "\n" + raw_query
-            return raw_query
-
-
 class MultilingualManager(BaseAttackManager):
     """
     Main class for managing and executing Multilingual attacks.
@@ -201,12 +112,20 @@ class MultilingualManager(BaseAttackManager):
     
     def __init__(
         self,
-        attack_data_path: str = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_path: Optional[str] = None,
+        attack_data_path: Optional[str] = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_offset: int = 0,
+        image_root_in: Optional[str] = None,
         target_model_path: str = "lmsys/vicuna-7b-v1.5",
         target_model_name: str = "vicuna_1.5",
-        model_type: str = 'local',
+        target_model_type: str = 'local',
+        model_type: Optional[str] = None,
         mutation_method: str = "zh-CN",
         system_prompt: str = "",
+        target_system_prompt: Optional[str] = None,
+        target_max_n_tokens: int = 512,
+        target_temperature: float = 0.7,
+        target_top_p: float = 1.0,
         device: str = "cuda",
         evaluator_type: str = 'pattern',
         evaluator_path: str = 'cais/HarmBench-Llama-2-13b-cls',
@@ -226,12 +145,20 @@ class MultilingualManager(BaseAttackManager):
 
         # Create configuration object
         self.config = MultilingualConfig(
+            data_path=data_path,
             attack_data_path=attack_data_path,
+            data_offset=data_offset,
+            image_root_in=image_root_in,
             target_model_path=target_model_path,
             target_model_name=target_model_name,
+            target_model_type=target_model_type,
             model_type=model_type,
             mutation_method=mutation_method,
             system_prompt=system_prompt,
+            target_system_prompt=target_system_prompt,
+            target_max_n_tokens=target_max_n_tokens,
+            target_temperature=target_temperature,
+            target_top_p=target_top_p,
             device=device,
             api_key=api_key,
             base_url=base_url,
@@ -251,18 +178,31 @@ class MultilingualManager(BaseAttackManager):
             setup_logger(log_file_path=self.config.log_path)
         
         logger.info(f"Multilingual Manager initialized with {len(self.attack_dataset)} attack examples")
-        logger.info(f"Using model type: {self.config.model_type}")
+        logger.info(f"Using model type: {self._target_model_type()}")
         logger.info(f"Target model: {self.config.target_model_name}")
         logger.info(f"Translation language: {self.config.mutation_method}")
+
+    def _target_model_type(self) -> str:
+        return self.config.target_model_type or self.config.model_type or "local"
+
+    def _resolve_data_path(self) -> str:
+        data_path = self.config.data_path or self.config.attack_data_path
+        if not data_path:
+            raise ValueError("Missing dataset path: set `data_path` (or legacy `attack_data_path`).")
+        return data_path
     
     def _initialize_components(self) -> None:
         """Initialize all components needed for the attack."""
-        # Load attack dataset
-        self.attack_dataset = AttackDataset(self.config.attack_data_path)
+        subset_slice = slice(self.config.data_offset, None) if self.config.data_offset else None
+        self.attack_dataset = AttackDataset(
+            self._resolve_data_path(),
+            subset_slice=subset_slice,
+            image_root_in=self.config.image_root_in,
+        )
                 
         # Initialize target model
         self.target_model = load_model(
-            model_type=self.config.model_type,
+            model_type=self._target_model_type(),
             model_name=self.config.target_model_name,
             model_path=self.config.target_model_path,
             config=self.config
@@ -271,9 +211,6 @@ class MultilingualManager(BaseAttackManager):
         # Initialize translation handler
         self.translation_handler = TranslationHandler(self.config)
         
-        # Initialize prompt formatter
-        self.prompt_formatter = PromptFormatter()
-
     def generate_attack_prompt(self, raw_query: str) -> List[str]:
         """Generate attack prompts using translation."""
         return self.translation_handler.mutate(raw_query)
@@ -282,43 +219,50 @@ class MultilingualManager(BaseAttackManager):
         """Generate mutated versions of the query using translation."""
         return self.generate_attack_prompt(query)
     
-    def format_msgs(self, raw_query: str) -> str:
-        """Format messages using the prompt formatter."""
-        return self.prompt_formatter.format_messages(
-            self.target_model, 
-            self.config.system_prompt, 
-            raw_query
-        )
-    
     def attack(self) -> None:
         """Execute the Multilingual attack on all examples in the dataset."""
         logger.info("Starting Multilingual attack...")
         
         for example_idx, example in enumerate(tqdm(self.attack_dataset, desc="Executing Multilingual attack")):
             try:
+                base_record = dict(example)
+                raw_query = (
+                    base_record.get("query")
+                    or base_record.get("prompt")
+                    or base_record.get("question")
+                    or base_record.get("instruction")
+                )
+                if not raw_query:
+                    continue
+
                 # Generate attack prompts
-                raw_query = example.query
                 mutated_queries = self.generate_attack_prompt(raw_query)
                 
                 for mutated_query in mutated_queries:
-                    # Format the prompt
-                    final_input = self.format_msgs(mutated_query)
+                    final_input = build_messages(
+                        mutated_query,
+                        inputs=base_record.get("inputs"),
+                        system_prompt=self.config.target_system_prompt or self.config.system_prompt,
+                    )
+                    response = self.target_model.chat(
+                        final_input,
+                        max_tokens=self.config.target_max_n_tokens,
+                        temperature=self.config.target_temperature,
+                        top_p=self.config.target_top_p,
+                    )
                     
-                    # Tokenize input
-                    response = self.target_model.chat(final_input)
+                    result_data = dict(base_record)
+                    result_data.update(
+                        {
+                            "example_idx": example_idx + self.config.data_offset,
+                            "query": raw_query,
+                            "final_query": mutated_query,
+                            "response": response,
+                            "mutation_method": self.config.mutation_method,
+                        }
+                    )
                     
-                    # Log results
-                    result_data = {
-                        'example_idx': example_idx,
-                        'query': raw_query,
-                        'final_query': mutated_query,
-                        'response': response,
-                        'model_type': self.config.model_type,
-                        'model_name': self.config.target_model_name,
-                        'mutation_method': self.config.mutation_method
-                    }
-                    
-                    self.log(result_data, save=True)
+                    self.save(result_data)
                     
             except Exception as e:
                 logger.error(f"Error processing example {example_idx}: {e}")

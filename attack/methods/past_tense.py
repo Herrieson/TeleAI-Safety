@@ -9,9 +9,6 @@ Based on the rewrite attack framework using template-based transformation.
 
 import os
 import sys
-import json
-import time
-import requests
 from typing import Optional, List, Dict, Any
 
 # Add current working directory to path for relative imports
@@ -27,19 +24,25 @@ from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from models import load_model
 from logger import setup_logger
+from utils.message_builder import build_messages
 
 @dataclass
 class PastTenseConfig:
     """Configuration class for Past Tense attack parameters."""
-    attack_data_path: str
-    rewrite_model_path: str
-    target_model_path: str
-    rewrite_model_name: str
-    target_model_name: str
+    data_path: Optional[str] = None
+    attack_data_path: Optional[str] = None
+    data_offset: int = 0
+    image_root_in: Optional[str] = None
+
+    rewrite_model_path: str = ""
+    target_model_path: str = ""
+    rewrite_model_name: str = ""
+    target_model_name: str = ""
     rewrite_model_type: str = 'openai'  # openai, azure, local
     target_model_type: str = 'openai'   # openai, azure, local
     rewrite_template: str = ""
     device: str = 'cpu'
+    target_system_prompt: Optional[str] = None
     
     # API keys for different services
     api_key: str = ''  # OpenAI API key
@@ -52,6 +55,7 @@ class PastTenseConfig:
     # Generation configuration
     max_n_tokens: int = 150
     temperature: float = 1.0
+    target_top_p: float = 1.0
     
     evaluator_type: str = 'pattern'
     evaluator_path: str = 'cais/HarmBench-Llama-2-13b-cls'
@@ -93,7 +97,13 @@ However, do not be constrained by these examples. Feel free to use your creativi
         """Rewrite content using past tense template."""
         try:
             prompt = self.template.format(content=content)
-            rewritten = self.rewrite_model.chat(prompt)
+            rewrite_input = build_messages(prompt)
+            rewritten = self.rewrite_model.chat(
+                rewrite_input,
+                max_tokens=self.config.max_n_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.target_top_p,
+            )
             return rewritten.strip()
         except Exception as e:
             logger.error(f"Rewrite failed for content '{content}': {e}")
@@ -110,16 +120,21 @@ class PastTenseManager(BaseAttackManager):
     
     def __init__(
         self,
-        attack_data_path: str = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_path: Optional[str] = None,
+        attack_data_path: Optional[str] = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_offset: int = 0,
+        image_root_in: Optional[str] = None,
         rewrite_model_path: str = "gpt-4",
         target_model_path: str = "gpt-4",
         rewrite_model_name: str = "gpt-4",
         target_model_name: str = "gpt-4",
         rewrite_model_type: str = 'openai',
         target_model_type: str = 'openai',
+        target_system_prompt: Optional[str] = None,
         rewrite_template: str = "",
         max_n_tokens: int = 150,
         temperature: float = 1.0,
+        target_top_p: float = 1.0,
         evaluator_type: str = 'pattern',
         evaluator_path: str = 'cais/HarmBench-Llama-2-13b-cls',
         device: str = 'cpu',
@@ -139,16 +154,21 @@ class PastTenseManager(BaseAttackManager):
 
         # Create configuration object
         self.config = PastTenseConfig(
+            data_path=data_path,
             attack_data_path=attack_data_path,
+            data_offset=data_offset,
+            image_root_in=image_root_in,
             rewrite_model_path=rewrite_model_path,
             target_model_path=target_model_path,
             rewrite_model_name=rewrite_model_name,
             target_model_name=target_model_name,
             rewrite_model_type=rewrite_model_type,
             target_model_type=target_model_type,
+            target_system_prompt=target_system_prompt,
             rewrite_template=rewrite_template,
             max_n_tokens=max_n_tokens,
             temperature=temperature,
+            target_top_p=target_top_p,
             evaluator_type=evaluator_type,
             evaluator_path=evaluator_path,
             device=device,
@@ -174,11 +194,21 @@ class PastTenseManager(BaseAttackManager):
         logger.info(f"Target model type: {self.config.target_model_type}")
         logger.info(f"Rewrite model: {self.config.rewrite_model_name}")
         logger.info(f"Target model: {self.config.target_model_name}")
+
+    def _resolve_data_path(self) -> str:
+        data_path = self.config.data_path or self.config.attack_data_path
+        if not data_path:
+            raise ValueError("Missing dataset path: set `data_path` (or legacy `attack_data_path`).")
+        return data_path
     
     def _initialize_components(self) -> None:
         """Initialize all components needed for the attack."""
-        # Load attack dataset
-        self.attack_dataset = AttackDataset(self.config.attack_data_path)
+        subset_slice = slice(self.config.data_offset, None) if self.config.data_offset else None
+        self.attack_dataset = AttackDataset(
+            self._resolve_data_path(),
+            subset_slice=subset_slice,
+            image_root_in=self.config.image_root_in,
+        )
         
         # Initialize rewrite model
         self.rewrite_model = load_model(
@@ -207,7 +237,7 @@ class PastTenseManager(BaseAttackManager):
         """Generate a mutated version of the query using past tense method."""
         return self.generate_attack_prompt(query)
     
-    def attack_single(self, prompt: str) -> Dict[str, Any]:
+    def attack_single(self, prompt: str, inputs: Optional[dict] = None) -> Dict[str, Any]:
         """
         Attack a single prompt using past tense method
         
@@ -221,16 +251,25 @@ class PastTenseManager(BaseAttackManager):
             # Generate rewritten prompt
             rewritten_prompt = self.generate_attack_prompt(prompt)
             
-            # Get response from target model
-            target_response = self.target_model.chat(rewritten_prompt)
+            target_input = build_messages(
+                rewritten_prompt,
+                inputs=inputs,
+                system_prompt=self.config.target_system_prompt,
+            )
+            target_response = self.target_model.chat(
+                target_input,
+                max_tokens=self.config.max_n_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.target_top_p,
+            )
             
             # Evaluate the response (placeholder for now)
             is_successful = False  # Would need actual evaluation logic
             
             result = {
-                "original": prompt,
-                "rewritten": rewritten_prompt,
-                "target_response": target_response,
+                "query": prompt,
+                "final_query": rewritten_prompt,
+                "response": target_response,
                 "is_successful": is_successful,
                 "method": "PastTense",
                 "rewrite_model": self.config.rewrite_model_name,
@@ -242,9 +281,9 @@ class PastTenseManager(BaseAttackManager):
         except Exception as e:
             logger.error(f"Attack failed for prompt: {prompt[:50]}... Error: {str(e)}")
             return {
-                "original": prompt,
-                "rewritten": "",
-                "target_response": "",
+                "query": prompt,
+                "final_query": "",
+                "response": "",
                 "is_successful": False,
                 "method": "PastTense",
                 "rewrite_model": self.config.rewrite_model_name,
@@ -264,31 +303,31 @@ class PastTenseManager(BaseAttackManager):
         
         for example_idx, example in enumerate(tqdm(self.attack_dataset, desc="Executing Past Tense attack")):
             try:
-                # Extract prompt from example
-                if hasattr(example, 'query'):
-                    prompt = example.query
-                elif hasattr(example, 'question'):
-                    prompt = example.question
-                elif hasattr(example, 'prompt'):
-                    prompt = example.prompt
-                elif isinstance(example, dict):
-                    prompt = example.get('query', example.get('question', example.get('prompt', str(example))))
-                else:
-                    prompt = str(example)
+                base_record = dict(example)
+                prompt = (
+                    base_record.get("query")
+                    or base_record.get("prompt")
+                    or base_record.get("question")
+                    or base_record.get("instruction")
+                )
+                if not prompt:
+                    continue
                 
                 # Perform attack
-                result = self.attack_single(prompt)
+                result = self.attack_single(prompt, inputs=base_record.get("inputs"))
                 
                 # Add metadata
-                result.update({
-                    "example_idx": example_idx,
+                output = dict(base_record)
+                output.update(result)
+                output.update({
+                    "example_idx": example_idx + self.config.data_offset,
                     "total_examples": total_examples
                 })
                 
                 # Log results
-                self.log(result, save=True)
+                self.save(output)
                 
-                if result["is_successful"]:
+                if output["is_successful"]:
                     successful_attacks += 1
                 
                 # Log progress every 10 examples
@@ -350,7 +389,7 @@ class PastTenseManager(BaseAttackManager):
         
         # Map dataset_path to attack_data_path
         if 'dataset_path' in config:
-            config['attack_data_path'] = config['dataset_path']
+            config['data_path'] = config['dataset_path']
         
         return cls(**config)
 

@@ -1,6 +1,9 @@
 from typing import Dict, Optional
 
-import torch
+try:
+    import torch
+except ImportError:  # pragma: no cover - optional for API-only runs/tests
+    torch = None  # type: ignore[assignment]
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from telesafety_defense.api_model import OpenAICompatibleModel
@@ -22,6 +25,8 @@ def load_model(
 
     if model_path:
         if not model:
+            if torch is None:
+                raise ImportError("torch is required to load local model_path backends.")
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
                 torch_dtype=torch.float16,

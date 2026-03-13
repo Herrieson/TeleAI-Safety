@@ -32,6 +32,7 @@ from dataset.example import Example
 from utils import BaseAttackManager, ConfigManager, parse_arguments, Timer
 from models import load_model
 from logger import setup_logger
+from utils.message_builder import build_messages
 from initialization.seed_template import SeedTemplate
 from selection.mcts_selection import MctsSelection
 from mutation.crossover import GPTFuzzerCrossOver
@@ -40,11 +41,15 @@ from mutation import Expand, GenerateSimilar, Shorten, Rephrase
 @dataclass
 class GPTFuzzerConfig:
     """Configuration class for GPTFuzzer attack parameters."""
-    attack_data_path: str
-    attack_model_path: str
-    target_model_path: str
-    attack_model_name: str
-    target_model_name: str
+    data_path: Optional[str] = None
+    attack_data_path: Optional[str] = None
+    data_offset: int = 0
+    image_root_in: Optional[str] = None
+
+    attack_model_path: str = ""
+    target_model_path: str = ""
+    attack_model_name: str = ""
+    target_model_name: str = ""
     attack_model_type: str = 'local'  # openai, azure, local
     target_model_type: str = 'local'  # openai, azure, local
     attack_model_generation_config: dict = field(default_factory=lambda: {"max_new_tokens": 512, "do_sample": True, "temperature": 0.8})
@@ -66,6 +71,11 @@ class GPTFuzzerConfig:
     azure_url: str = ''  # Azure endpoint URL
     grok_key: str = ''  # Grok API key  
     grok_url: str = ''  # Grok endpoint URL
+
+    target_system_prompt: Optional[str] = None
+    target_max_n_tokens: int = 512
+    target_temperature: float = 0.8
+    target_top_p: float = 1.0
     
     res_save_path: Optional[str] = None
     log_path: Optional[str] = None
@@ -287,7 +297,10 @@ class GPTFuzzerManager(BaseAttackManager):
 
     def __init__(
         self,
-        attack_data_path: str = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_path: Optional[str] = None,
+        attack_data_path: Optional[str] = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_offset: int = 0,
+        image_root_in: Optional[str] = None,
         attack_model_path: str = "/gemini/code/Qwen2.5-7B-Instruct",
         target_model_path: str = "/gemini/code/Qwen2.5-7B-Instruct",
         attack_model_name: str = "qwen2.5",
@@ -305,6 +318,10 @@ class GPTFuzzerManager(BaseAttackManager):
         max_iteration: int = 100,
         template_file: str = "aisafetylab/attack/initialization/init_templates.json",
         device: str = "cuda:0",
+        target_system_prompt: Optional[str] = None,
+        target_max_n_tokens: int = 512,
+        target_temperature: float = 0.8,
+        target_top_p: float = 1.0,
         res_save_path: str = "./results/gptfuzzer_results.jsonl",
         log_path: str = '../logs/',
         subset_slice: Optional[slice] = None,
@@ -328,7 +345,10 @@ class GPTFuzzerManager(BaseAttackManager):
 
         # Create configuration object
         self.config = GPTFuzzerConfig(
+            data_path=data_path,
             attack_data_path=attack_data_path,
+            data_offset=data_offset,
+            image_root_in=image_root_in,
             attack_model_path=attack_model_path,
             target_model_path=target_model_path,
             attack_model_name=attack_model_name,
@@ -352,6 +372,10 @@ class GPTFuzzerManager(BaseAttackManager):
             azure_url=azure_url,
             grok_key=grok_key,
             grok_url=grok_url,
+            target_system_prompt=target_system_prompt,
+            target_max_n_tokens=target_max_n_tokens,
+            target_temperature=target_temperature,
+            target_top_p=target_top_p,
             res_save_path=res_save_path,
             log_path=log_path
         )
@@ -392,7 +416,16 @@ class GPTFuzzerManager(BaseAttackManager):
         logger.info(f"Target model name: {self.config.target_model_name}")
 
         # Load dataset
-        self.jailbreak_datasets = AttackDataset(self.config.attack_data_path, subset_slice=subset_slice)
+        if subset_slice is None and self.config.data_offset:
+            subset_slice = slice(self.config.data_offset, None)
+        data_path = self.config.data_path or self.config.attack_data_path
+        if not data_path:
+            raise ValueError("Missing dataset path: set `data_path` (or legacy `attack_data_path`).")
+        self.jailbreak_datasets = AttackDataset(
+            data_path,
+            subset_slice=subset_slice,
+            image_root_in=self.config.image_root_in,
+        )
 
         # Initialize components
         self.gptfuzzer_init = GPTFuzzerInit(self.config, self.jailbreak_datasets)
@@ -450,16 +483,33 @@ class GPTFuzzerManager(BaseAttackManager):
                 for mutator_instance in tqdm(mutated_results, desc="Processing mutated instances"):
                     self.temp_results = AttackDataset([])
                     logger.info('Begin to get model responses')
-                    input_seeds = []
+                    input_messages = []
+                    input_meta = []
                     for query_instance in tqdm(self.data.questions, desc="Preparing input seeds"):
+                        query_record = dict(query_instance)
+                        raw_query = (
+                            query_record.get("query")
+                            or query_record.get("prompt")
+                            or query_record.get("question")
+                            or query_record.get("instruction")
+                        )
+                        if not raw_query:
+                            raw_query = ""
                         if '{query}' in mutator_instance.jailbreak_prompt:
-                            input_seed = mutator_instance.jailbreak_prompt.replace('{query}', query_instance.query)
+                            input_seed = mutator_instance.jailbreak_prompt.replace('{query}', raw_query)
                         else:
-                            input_seed = mutator_instance.jailbreak_prompt + query_instance.query
-                        input_seeds.append(input_seed)
+                            input_seed = mutator_instance.jailbreak_prompt + raw_query
+                        input_messages.append(
+                            build_messages(
+                                input_seed,
+                                inputs=query_record.get("inputs"),
+                                system_prompt=self.config.target_system_prompt,
+                            )
+                        )
+                        input_meta.append((input_seed, query_record))
                     
-                    logger.info(f"Sending {len(input_seeds)} queries to target model...")
-                    all_responses = self.target_model.batch_chat(input_seeds)
+                    logger.info(f"Sending {len(input_messages)} queries to target model...")
+                    all_responses = self.target_model.batch_chat(input_messages)
                     logger.info("Received all responses from target model")
                             
                     for idx, query_instance in enumerate(tqdm(self.data.questions, desc="Processing responses")):
@@ -469,7 +519,18 @@ class GPTFuzzerManager(BaseAttackManager):
                         # print(f'Copy costs {t.end()} seconds')
                         temp_instance.target_responses = []
                         temp_instance.eval_results = []
-                        temp_instance.query = query_instance.query
+                        final_query, query_record = input_meta[idx]
+                        raw_query = (
+                            query_record.get("query")
+                            or query_record.get("prompt")
+                            or query_record.get("question")
+                            or query_record.get("instruction")
+                            or ""
+                        )
+                        temp_instance.query = raw_query
+                        temp_instance._base_record = query_record
+                        temp_instance._final_query = final_query
+                        temp_instance._example_idx = getattr(query_instance, "index", idx)
 
                         if temp_instance.query not in self.data.query_to_idx:
                             self.data.query_to_idx[temp_instance.query] = len(self.data.query_to_idx)
@@ -486,26 +547,21 @@ class GPTFuzzerManager(BaseAttackManager):
 
                     self.update(self.temp_results)
                     for instance in self.temp_results:
-                        # self.data.attack_results.data.append(instance.copy())
-                        example_idx = self.data.query_to_idx[instance.query]
-                        
-                        # Check if jailbreak_prompt is empty or invalid
-                        if not instance.jailbreak_prompt or instance.jailbreak_prompt.strip() == "":
-                            logger.warning(f"Empty jailbreak_prompt for query: {instance.query}")
-                            final_query = instance.query  # Fallback to original query
-                        elif '{query}' in instance.jailbreak_prompt:
-                            final_query = instance.jailbreak_prompt.replace('{query}', instance.query)
-                        else:
-                            final_query = instance.jailbreak_prompt + " " + instance.query
+                        example_idx = getattr(instance, "_example_idx", self.data.query_to_idx.get(instance.query, 0))
+                        final_query = getattr(instance, "_final_query", instance.query)
+                        base_record = dict(getattr(instance, "_base_record", {}))
                         
                         logger.debug(f'final_query: {final_query}\nresponse: {instance.target_responses[0] if instance.target_responses else "No response"}')
 
-                        result = {
-                            "example_idx": self.data.query_to_idx[instance.query],
-                            "query": instance.query,
-                            "final_query": final_query,
-                            "response": instance.target_responses[0] if instance.target_responses else "",
-                        }
+                        result = dict(base_record)
+                        result.update(
+                            {
+                                "example_idx": example_idx + self.config.data_offset,
+                                "query": instance.query,
+                                "final_query": final_query,
+                                "response": instance.target_responses[0] if instance.target_responses else "",
+                            }
+                        )
                         if example_idx not in example_idx_to_results:
                             example_idx_to_results[example_idx] = result
                         else:
@@ -553,7 +609,16 @@ class GPTFuzzerManager(BaseAttackManager):
                 else:
                     input_seed = instance.jailbreak_prompt + " " + instance.query
                     
-                response = self.target_model.chat(input_seed)
+                input_messages = build_messages(
+                    input_seed,
+                    system_prompt=self.config.target_system_prompt,
+                )
+                response = self.target_model.chat(
+                    input_messages,
+                    max_tokens=self.config.target_max_n_tokens,
+                    temperature=self.config.target_temperature,
+                    top_p=self.config.target_top_p,
+                )
                 instance.target_responses.append(response)
             instance.parents = []
             instance.children = []

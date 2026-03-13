@@ -1,0 +1,16 @@
+defender_type: JailDAM
+
+# Optional detector checkpoint path. If missing, detector stays disabled.
+checkpoint_path: ""
+checkpoint_path_env: "JAILDAM_CHECKPOINT_PATH"
+
+threshold: 123.912
+clip_model_name: "openai/clip-vit-large-patch14"
+
+# fail_mode:
+# - open: fall back to model.chat on detector failure
+# - closed: always refuse on detector failure
+fail_mode: "open"
+
+# Optional override: "cpu" | "cuda"
+# device: "cuda"

@@ -12,6 +12,13 @@ The following methods now write output records by copying the input record and a
 - methods/morpheus_gapfill.py
 - methods/pair.py
 - methods/rene.py
+- methods/gptfuzzer.py
+- methods/ica.py
+- methods/multilingual.py
+- methods/overload.py
+- methods/past_tense.py
+- methods/scav.py
+- methods/tap.py
 
 ## Multimodal Message Support
 These methods are confirmed to use `utils.message_builder.py` (image_url-style payloads for OpenAI/Azure) when `inputs` are provided:
@@ -23,19 +30,19 @@ These methods are confirmed to use `utils.message_builder.py` (image_url-style p
 - methods/morpheus_gapfill.py
 - methods/pair.py
 - methods/rene.py
+- methods/gptfuzzer.py
+- methods/ica.py
+- methods/multilingual.py
+- methods/overload.py
+- methods/past_tense.py
+- methods/scav.py
+- methods/tap.py
 
 ## Not Yet Updated (output passthrough / multimodal)
 - methods/advprompter.py
 - methods/autodan.py
 - methods/base_attacker.py
 - methods/gcg.py
-- methods/gptfuzzer.py
-- methods/ica.py
 - methods/laa.py
-- methods/mml.py
-- methods/multilingual.py
-- methods/overload.py
-- methods/past_tense.py
+- methods/txt_img/mml.py
 - methods/random_search.py
-- methods/scav.py
-- methods/tap.py

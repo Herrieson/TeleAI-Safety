@@ -52,10 +52,22 @@ def get_question_label(obj: dict) -> Optional[int]:
     return None
 
 
-def read_jsonl(path: str, cost_matrix: Dict[int, Dict[int, float]]) -> Tuple[int, int, float]:
+def init_cell_counts() -> Dict[int, Dict[int, int]]:
+    return {
+        0: {0: 0, 1: 0, 2: 0},
+        1: {0: 0, 1: 0, 2: 0},
+        2: {0: 0, 1: 0, 2: 0},
+    }
+
+
+def read_jsonl(
+    path: str,
+    cost_matrix: Dict[int, Dict[int, float]],
+) -> Tuple[int, int, float, Dict[int, Dict[int, int]]]:
     total = 0
     used = 0
     cost_sum = 0.0
+    cell_counts = init_cell_counts()
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -76,8 +88,9 @@ def read_jsonl(path: str, cost_matrix: Dict[int, Dict[int, float]]) -> Tuple[int
             if cost is None:
                 continue
             cost_sum += float(cost)
+            cell_counts[y][y_hat] += 1
             used += 1
-    return total, used, cost_sum
+    return total, used, cost_sum, cell_counts
 
 
 def write_report(
@@ -87,6 +100,7 @@ def write_report(
     total: int,
     used: int,
     cost_matrix: Dict[int, Dict[int, float]],
+    cell_counts: Dict[int, Dict[int, int]],
 ) -> None:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     lines = [
@@ -100,6 +114,17 @@ def write_report(
         f"  Label 1 -> {{0: {cost_matrix[1][0]}, 1: {cost_matrix[1][1]}, 2: {cost_matrix[1][2]}}}",
         f"  Label 2 -> {{0: {cost_matrix[2][0]}, 1: {cost_matrix[2][1]}, 2: {cost_matrix[2][2]}}}",
     ]
+    lines.append("Cell counts and ratios (y -> y_hat):")
+    if used > 0:
+        for y in (0, 1, 2):
+            cells = []
+            for y_hat in (0, 1, 2):
+                count = int(cell_counts.get(y, {}).get(y_hat, 0))
+                ratio = count / used
+                cells.append(f"{y_hat}: {count} ({ratio:.4%})")
+            lines.append(f"  Label {y} -> {{{', '.join(cells)}}}")
+    else:
+        lines.append("  N/A (no valid samples)")
     if mean_cost is None:
         lines.append("Mean cost: N/A")
     else:
@@ -112,9 +137,9 @@ def main() -> None:
     args = parse_args()
     input_path = args.input
     output_path = args.output or derive_output_path(input_path)
-    total, used, cost_sum = read_jsonl(input_path, DEFAULT_COST_MATRIX)
+    total, used, cost_sum, cell_counts = read_jsonl(input_path, DEFAULT_COST_MATRIX)
     mean_cost = (cost_sum / used) if used > 0 else None
-    write_report(output_path, input_path, mean_cost, total, used, DEFAULT_COST_MATRIX)
+    write_report(output_path, input_path, mean_cost, total, used, DEFAULT_COST_MATRIX, cell_counts)
     print(f"Wrote {output_path}")
 
 

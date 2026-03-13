@@ -48,6 +48,14 @@ class DefenderRegistryBuilderTests(unittest.TestCase):
         )
         self.assertEqual(defender.__class__.__name__, "CourtGuardDefender")
 
+    def test_create_rpo_defender_without_local_model(self):
+        defender = create_defender("RPO")
+        self.assertEqual(defender.__class__.__name__, "RPODefender")
+
+    def test_create_erasecheck_defender_without_local_model(self):
+        defender = create_defender("EraseCheck")
+        self.assertEqual(defender.__class__.__name__, "EraseCheckDefender")
+
     def test_unknown_defender_raises(self):
         with self.assertRaises(ValueError):
             resolve_defender_class("NotARealDefender")

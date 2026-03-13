@@ -80,6 +80,13 @@ huggingface/
 # Datasets
 data/
 
+# Result
+benchmark/result/
+
 # Todo
 defense/todo/
 attack/methods/todo/
+
+# doc
+assets/metrics_doc/
+assets/report_example/

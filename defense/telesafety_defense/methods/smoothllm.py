@@ -6,14 +6,43 @@ Paper title:SMOOTHLLM: Defending Large Language Models Against Jailbreaking Atta
 """
 
 from telesafety_defense.base_factory import OutputDefender
-from aisafetylab.models import LocalModel
 from telesafety_defense.utils import DictScorer
-from telesafety_defense.utils.prompts import SORRY_RESPONSE
-from loguru import logger
 import random
-import copy
 import string
 import numpy as np
+
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+        def debug(self, msg, *args):
+            self._logger.debug(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
+
 
 class SmoothLLMDefender(OutputDefender):
     """
@@ -32,7 +61,7 @@ class SmoothLLMDefender(OutputDefender):
         model,
         model_name,
         tokenizer,
-        scorer=DictScorer(),
+        scorer=None,
         pert_type='RandomSwapPerturbation',
         pert_pct=10.0,
         num_copies=10,
@@ -42,7 +71,7 @@ class SmoothLLMDefender(OutputDefender):
         self.model = model
         self.model_name = model_name
         self.tokenizer = tokenizer
-        self.scorer = scorer
+        self.scorer = scorer or DictScorer()
         self.pert_type = pert_type
         self.pert_pct = pert_pct
         self.num_copies = num_copies
@@ -54,6 +83,20 @@ class SmoothLLMDefender(OutputDefender):
             f"perturbation: {pert_type}, perturbation percentage: {pert_pct}, "
             f"number of copies: {num_copies}"
         )
+
+    @staticmethod
+    def _batch_chat_with_fallback(model, batch_messages, batch_size):
+        if hasattr(model, "batch_chat"):
+            try:
+                responses = model.batch_chat(batch_messages, batch_size=batch_size)
+                if len(responses) == len(batch_messages):
+                    return responses
+            except Exception:
+                logger.warning("model.batch_chat failed in SmoothLLM; fallback to per-sample chat.")
+
+        if not hasattr(model, "chat"):
+            raise AttributeError("Provided model does not support chat/batch_chat interface.")
+        return [model.chat(messages) for messages in batch_messages]
 
     def get_perturbation_fn(self, pert_type, pert_pct):
         if pert_type == 'RandomSwapPerturbation':
@@ -99,8 +142,9 @@ class SmoothLLMDefender(OutputDefender):
             }]
             perturbed_messages_list.append(perturbed_message)
         #print(perturbed_messages_list)  
-        responses = model.batch_chat(perturbed_messages_list, self.batch_size)
-        print(responses)
+        responses = self._batch_chat_with_fallback(
+            model, perturbed_messages_list, self.batch_size
+        )
         are_copies_jailbroken = [self.scorer.score("", response)['score'] == 1 for response in responses]
         
         if self.verbose:
@@ -125,7 +169,11 @@ class SmoothLLMDefender(OutputDefender):
             output for (output, jb) in outputs_and_jbs 
             if jb == smoothLLM_jb
         ]
-        return random.choice(majority_outputs)
+        if majority_outputs:
+            return random.choice(majority_outputs)
+        if responses:
+            return responses[0]
+        return ""
 
 class Perturbation:
     """Base class for random perturbations."""

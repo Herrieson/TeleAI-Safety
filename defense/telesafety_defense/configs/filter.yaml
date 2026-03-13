@@ -19,6 +19,11 @@ attack_types:
   
 target_model: "vicuna-7b-v1.5"
 
+# Runtime backend mode: auto | local | api
+backend: "auto"
+# Optional pipeline local model path used by methods without built-in model assets.
+# model_path: "./models/vicuna-7b-v1.5"
+
 # API backend (optional, used when defender config does not provide local model/tokenizer)
 # api_base_url: "https://api.openai.com/v1"
 # api_model_name: "gpt-4o-mini"

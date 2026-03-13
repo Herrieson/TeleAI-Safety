@@ -4,7 +4,30 @@ try:
     from loguru import logger
 except ImportError:
     import logging
-    logger = logging.getLogger(__name__)
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
 
 try:
     from tqdm import tqdm

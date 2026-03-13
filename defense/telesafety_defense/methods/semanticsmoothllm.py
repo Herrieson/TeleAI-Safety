@@ -9,15 +9,53 @@ Arxiv link: https://arxiv.org/abs/2402.16192
 Source repository: https://github.com/UCSB-NLP-Chang/SemanticSmooth
 """
 from telesafety_defense.base_factory import OutputDefender
-from aisafetylab.models import LocalModel
 from telesafety_defense.utils import DictScorer
 from telesafety_defense.utils.prompts import SORRY_RESPONSE, PARAPHRASE_TEXT, SPELLCHECK_TEXT, SUMMARIZE_TEXT, SYNONYM_TEXT, TRANSLATION_TEXT, VERTTENSE_TEXT
-from loguru import logger
 import random
-import os
 import numpy as np
 import json
-import tiktoken
+
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+        def debug(self, msg, *args):
+            self._logger.debug(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
+
+
+_PERTURBATION_TEMPLATES = {
+    "paraphrase": PARAPHRASE_TEXT,
+    "spellcheck": SPELLCHECK_TEXT,
+    "summarize": SUMMARIZE_TEXT,
+    "synonym": SYNONYM_TEXT,
+    "translation": TRANSLATION_TEXT,
+    "verbtense": VERTTENSE_TEXT,
+}
 
 class SemanticSmoothLLMDefender(OutputDefender):
     def __init__(
@@ -25,7 +63,7 @@ class SemanticSmoothLLMDefender(OutputDefender):
         model,
         model_name,
         tokenizer,
-        scorer=DictScorer(), 
+        scorer=None,
         pert_type='random', 
         num_samples=3,
         batch_size=1, 
@@ -41,7 +79,7 @@ class SemanticSmoothLLMDefender(OutputDefender):
         self.model = model
         self.model_name = model_name
         self.tokenizer = tokenizer
-        self.scorer = scorer
+        self.scorer = scorer or DictScorer()
         self.pert_type = pert_type
         self.num_samples = num_samples
         self.batch_size = batch_size
@@ -52,6 +90,29 @@ class SemanticSmoothLLMDefender(OutputDefender):
             f"num_samples: {self.num_samples}, batch_size: {self.batch_size}"
         )
 
+    @staticmethod
+    def _batch_chat_with_fallback(model, batch_messages, batch_size):
+        if hasattr(model, "batch_chat"):
+            try:
+                outputs = model.batch_chat(batch_messages, batch_size=batch_size)
+                if len(outputs) == len(batch_messages):
+                    return outputs
+            except Exception:
+                logger.warning(
+                    "model.batch_chat failed in SemanticSmoothLLM; fallback to per-sample chat."
+                )
+
+        if not hasattr(model, "chat"):
+            raise AttributeError("Provided model does not support chat/batch_chat interface.")
+        return [model.chat(msgs) for msgs in batch_messages]
+
+    def _chat_with_generation(self, runtime_model, messages):
+        if not hasattr(runtime_model, "chat"):
+            raise AttributeError("Runtime model does not support chat interface.")
+        if self.generation_config:
+            return runtime_model.chat(messages, **self.generation_config)
+        return runtime_model.chat(messages)
+
     def random_perturb(self, harmful_prompt):
         """
         Args:
@@ -61,14 +122,11 @@ class SemanticSmoothLLMDefender(OutputDefender):
             str: The perturbed prompt.
         """
         perturbation_list = ["paraphrase", "spellcheck", "summarize", "synonym", "translation", "verbtense"]
-        
-        if self.pert_type == 'random':
-            self.pert_type = random.choice(perturbation_list)
+        selected_type = random.choice(perturbation_list) if self.pert_type == "random" else self.pert_type
 
-        if self.pert_type in perturbation_list:
-            return self.perturb(self.pert_type, harmful_prompt)
-        else:
-            raise NotImplementedError(f"{self.pert_type} is not implemented!")
+        if selected_type in perturbation_list:
+            return self.perturb(selected_type, harmful_prompt)
+        raise NotImplementedError(f"{selected_type} is not implemented!")
         
     def perturb_with_llm(self, template, harmful_prompt):
         """
@@ -83,11 +141,10 @@ class SemanticSmoothLLMDefender(OutputDefender):
         # Use the runtime model wrapper passed in `defend`
         runtime_model = getattr(self, "_runtime_model", None)
         if runtime_model is None:
-            # Fallback: create a temporary LocalModel wrapper if needed
-            runtime_model = LocalModel(self.model, self.tokenizer, self.model_name, self.generation_config)
-        return runtime_model.chat([
+            raise RuntimeError("SemanticSmoothLLMDefender requires runtime model in defend().")
+        return self._chat_with_generation(runtime_model, [
             {"role": "user", "content": prompt}
-        ], generation_config=self.generation_config)
+        ])
     
     def perturb(self, pert_type, harmful_prompt):
         """
@@ -98,8 +155,9 @@ class SemanticSmoothLLMDefender(OutputDefender):
         Returns:
             str: The perturbed prompt.
         """
-        pert_type = pert_type.upper()
-        perturbation_template = f"{pert_type}_TEXT"
+        perturbation_template = _PERTURBATION_TEMPLATES.get(pert_type.lower())
+        if perturbation_template is None:
+            raise NotImplementedError(f"{pert_type} template is not implemented.")
         return self.perturb_with_llm(perturbation_template, harmful_prompt)
     
     def extract_response(self, outputs):
@@ -132,7 +190,7 @@ class SemanticSmoothLLMDefender(OutputDefender):
                         outobj = outobj.replace("\"query\": ", "")
                         outobj = outobj.strip("\" ")
                     res.append(str(outobj))
-            except Exception as e:
+            except Exception:
                 x = x.replace("{\"replace\": ", "")
                 x = x.replace("{\"rewrite\": ", "")
                 x = x.replace("{\"fix\": ", "")
@@ -148,7 +206,7 @@ class SemanticSmoothLLMDefender(OutputDefender):
         return res
     
     def defend(self, model, messages):
-        # record runtime LocalModel wrapper for perturbations
+        # record runtime model wrapper for perturbations
         self._runtime_model = model
         if isinstance(messages, str):
             messages = [
@@ -166,21 +224,27 @@ class SemanticSmoothLLMDefender(OutputDefender):
         all_inputs = self.extract_response(all_inputs)
 
         all_outputs = []
-        for i in range(self.num_samples // self.batch_size + 1):
+        for i in range(max(1, self.num_samples // self.batch_size + 1)):
             batch = all_inputs[i * self.batch_size:(i + 1) * self.batch_size]
+            if not batch:
+                continue
             batch_messages = [messages.copy() for _ in batch]
             for j, perturbed_prompt in enumerate(batch):
-                batch_messages[j][-1]['content'] = perturbed_prompt
+                msg_seq = [dict(msg) for msg in batch_messages[j]]
+                msg_seq[-1]["content"] = perturbed_prompt
+                batch_messages[j] = msg_seq
 
-            batch_outputs = model.batch_chat(batch_messages)
+            batch_outputs = self._batch_chat_with_fallback(
+                model, batch_messages, self.batch_size
+            )
             tmp = []
 
             for output in batch_outputs:
                 try:
                     response = output
-                except:
+                except Exception:
                     response = SORRY_RESPONSE
-                    print(f"Batch Generation failed while return {output}.")
+                    logger.warning("Batch generation failed for one sample in SemanticSmoothLLM.")
 
                 tmp.append(response)
             all_outputs.extend(tmp)
@@ -197,6 +261,11 @@ class SemanticSmoothLLMDefender(OutputDefender):
             if jb == smooth_llm_jb
         ]
 
-        chosen_output = random.choice(majority_outputs) if majority_outputs else prompt
+        if majority_outputs:
+            chosen_output = random.choice(majority_outputs)
+        elif all_outputs:
+            chosen_output = all_outputs[0]
+        else:
+            chosen_output = SORRY_RESPONSE
 
         return chosen_output

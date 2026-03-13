@@ -4,7 +4,7 @@
 
 ### 1. 如何新增方法
 
-建议参考已有方法（如 `methods/pair.py`、`methods/cipher.py`、`methods/rene.py`、`methods/mml.py`）的结构。新增方法时，建议遵循以下步骤：
+建议参考已有方法（如 `methods/pair.py`、`methods/cipher.py`、`methods/rene.py`、`methods/txt_img/mml.py`）的结构。新增方法时，建议遵循以下步骤：
 
 1) **新增方法脚本**  
 在 `methods/` 下创建 `your_method.py`，实现类和入口函数。

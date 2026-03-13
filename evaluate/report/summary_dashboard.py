@@ -12,6 +12,7 @@ DEFAULT_INPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "summary_
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_overview.md")
 DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
 DEFAULT_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap.png")
+DEFAULT_FRR_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap_frr.png")
 DEFAULT_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png")
 DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png")
 DEFAULT_BIAS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias.png")
@@ -292,7 +293,10 @@ def format_model_attack_matrix(rows: List[Dict[str, str]]) -> Tuple[List[str], L
     return attacks, matrix_rows
 
 
-def build_matrix(rows: List[Dict[str, str]]) -> Tuple[List[str], List[str], List[List[float]]]:
+def build_matrix(
+    rows: List[Dict[str, str]],
+    metric_key: str = "avg_asr",
+) -> Tuple[List[str], List[str], List[List[float]]]:
     models = sorted({row["model"] for row in rows})
     attacks = sorted({row["attack"] for row in rows})
     model_index = {model: idx for idx, model in enumerate(models)}
@@ -300,7 +304,7 @@ def build_matrix(rows: List[Dict[str, str]]) -> Tuple[List[str], List[str], List
     matrix = [[float("nan") for _ in attacks] for _ in models]
     for row in rows:
         try:
-            val = float(row["avg_asr"])
+            val = float(row[metric_key])
         except (TypeError, ValueError):
             continue
         i = model_index[row["model"]]
@@ -327,6 +331,7 @@ def compute_attack_summary(rows: List[Dict[str, str]]) -> List[Tuple[str, float]
 def generate_plots(
     rows: List[Dict[str, str]],
     heatmap_path: str,
+    frr_heatmap_path: str,
     model_bar_path: str,
     attack_bar_path: str,
     frr_model_bar_path: str,
@@ -346,7 +351,6 @@ def generate_plots(
         return []
 
     created: List[str] = []
-    models, attacks, matrix = build_matrix(rows)
 
     def setup_axis(ax, title: str, ylabel: str) -> None:
         ax.set_title(title, fontsize=14, fontweight="bold", pad=20, loc="left")
@@ -358,13 +362,27 @@ def generate_plots(
         ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.2)
         ax.set_axisbelow(True)
 
-    if models and attacks:
+    def render_heatmap(
+        models: List[str],
+        attacks: List[str],
+        matrix: List[List[float]],
+        *,
+        title: str,
+        cbar_label: str,
+        output_path: str,
+    ) -> Optional[str]:
+        if not models or not attacks:
+            return None
         data = np.array(matrix, dtype=float)
+        if not np.isfinite(data).any():
+            return None
         fig_w = max(8.0, len(attacks) * 1.2)
         fig_h = max(6.0, len(models) * 0.8)
         fig, ax = plt.subplots(figsize=(fig_w, fig_h))
         vmin = 0.0
         vmax = float(np.nanmax(data)) if np.isfinite(np.nanmax(data)) else 1.0
+        if vmax <= 0.0:
+            vmax = 1.0
         im = ax.imshow(data, aspect="auto", cmap="RdYlBu_r", vmin=vmin, vmax=vmax)
         ax.set_xticks(np.arange(len(attacks) + 1) - 0.5, minor=True)
         ax.set_yticks(np.arange(len(models) + 1) - 0.5, minor=True)
@@ -393,14 +411,38 @@ def generate_plots(
                     fontweight="bold",
                 )
         cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cbar.ax.set_ylabel("Avg ASR", rotation=-90, va="bottom", fontsize=10)
+        cbar.ax.set_ylabel(cbar_label, rotation=-90, va="bottom", fontsize=10)
         cbar.outline.set_visible(False)
-        ax.set_title("Model ASR by Attack Matrix", fontsize=14, fontweight="bold", pad=20)
+        ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
         fig.tight_layout()
-        os.makedirs(os.path.dirname(heatmap_path), exist_ok=True)
-        fig.savefig(heatmap_path, dpi=300, bbox_inches="tight")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
-        created.append(heatmap_path)
+        return output_path
+
+    asr_models, asr_attacks, asr_matrix = build_matrix(rows, metric_key="avg_asr")
+    asr_heatmap = render_heatmap(
+        asr_models,
+        asr_attacks,
+        asr_matrix,
+        title="Model ASR by Attack Matrix",
+        cbar_label="Avg ASR",
+        output_path=heatmap_path,
+    )
+    if asr_heatmap:
+        created.append(asr_heatmap)
+
+    frr_models, frr_attacks, frr_matrix = build_matrix(rows, metric_key="avg_frr")
+    frr_heatmap = render_heatmap(
+        frr_models,
+        frr_attacks,
+        frr_matrix,
+        title="Model FRR by Attack Matrix",
+        cbar_label="Avg FRR",
+        output_path=frr_heatmap_path,
+    )
+    if frr_heatmap:
+        created.append(frr_heatmap)
 
     model_summary = format_model_summary(rows)
     model_vals = []
@@ -1201,6 +1243,13 @@ def write_markdown(
         if heatmap_path:
             rel_heatmap = os.path.relpath(heatmap_path, os.path.dirname(output_path))
             lines.extend(["", f"![Model ASR by Attack Heatmap]({rel_heatmap})"])
+        frr_heatmap_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_FRR_HEATMAP)),
+            None,
+        )
+        if frr_heatmap_path:
+            rel_frr_heatmap = os.path.relpath(frr_heatmap_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model FRR by Attack Heatmap]({rel_frr_heatmap})"])
 
     if model_summary:
         lines.extend(
@@ -1507,6 +1556,7 @@ def main() -> None:
     parser.add_argument("--cm-dir", default=DEFAULT_CM_DIR, help="Directory with CM reports")
     parser.add_argument("--kappa-csv", default=DEFAULT_KAPPA_CSV, help="Kappa report CSV path")
     parser.add_argument("--heatmap", default=DEFAULT_HEATMAP, help="Heatmap image path")
+    parser.add_argument("--frr-heatmap", default=DEFAULT_FRR_HEATMAP, help="FRR heatmap image path")
     parser.add_argument("--model-bar", default=DEFAULT_MODEL_BAR, help="Model bar chart path")
     parser.add_argument("--attack-bar", default=DEFAULT_ATTACK_BAR, help="Attack bar chart path")
     parser.add_argument("--bias-bar", default=DEFAULT_BIAS_BAR, help="Bias bar chart path")
@@ -1565,6 +1615,7 @@ def main() -> None:
         plot_paths = generate_plots(
             rows,
             os.path.abspath(args.heatmap),
+            os.path.abspath(args.frr_heatmap),
             os.path.abspath(args.model_bar),
             os.path.abspath(args.attack_bar),
             os.path.abspath(args.frr_bar),

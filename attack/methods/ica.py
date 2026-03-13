@@ -10,7 +10,6 @@ arXiv link: https://arxiv.org/pdf/2310.06387
 import os
 import sys
 import json
-import time
 import random
 from typing import Optional, List, Dict, Any
 
@@ -25,19 +24,26 @@ from dataclasses import dataclass
 # Local imports
 from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
-from models import load_model, FORMATTER_REGISTRY, DefaultFormatter
+from models import load_model
+from utils.message_builder import build_messages
 from logger import setup_logger
 
 @dataclass
 class ICAConfig:
     """Configuration class for ICA attack parameters."""
-    attack_data_path: str
-    target_model_path: str  
-    target_model_name: str
-    model_type: str = 'openai'  # openai, azure, local
+    data_path: Optional[str] = None
+    attack_data_path: Optional[str] = None
+    data_offset: int = 0
+    image_root_in: Optional[str] = None
+
+    target_model_path: str = ""
+    target_model_name: str = ""
+    target_model_type: str = 'openai'  # openai, azure, local
+    model_type: Optional[str] = None  # backward-compatible alias
     demo_num: int = 1
     lang: str = 'en'
     system_prompt: str = 'You are a helpful assistant.'
+    target_system_prompt: Optional[str] = None
     device: str = 'cpu'
     
     # API keys for different services
@@ -50,6 +56,11 @@ class ICAConfig:
     
     evaluator_type: str = 'pattern'
     evaluator_path: str = 'cais/HarmBench-Llama-2-13b-cls'
+
+    target_max_n_tokens: int = 512
+    target_temperature: float = 0.7
+    target_top_p: float = 1.0
+
     res_save_path: Optional[str] = None
     log_path: Optional[str] = None
     template_path: Optional[str] = None
@@ -121,15 +132,23 @@ class ICAManager(BaseAttackManager):
     
     def __init__(
         self,
-        attack_data_path: str,
-        target_model_path: str,
-        target_model_name: str,
-        model_type: str = 'openai',
+        data_path: Optional[str] = None,
+        attack_data_path: Optional[str] = None,
+        target_model_path: str = "",
+        target_model_name: str = "",
+        target_model_type: str = 'openai',
+        model_type: Optional[str] = None,
+        data_offset: int = 0,
+        image_root_in: Optional[str] = None,
         demo_num: int = 1,
         lang: str = 'en',
         evaluator_type: str = 'pattern',
         evaluator_path: str = 'cais/HarmBench-Llama-2-13b-cls',
         system_prompt: str = 'You are a helpful assistant.',
+        target_system_prompt: Optional[str] = None,
+        target_max_n_tokens: int = 512,
+        target_temperature: float = 0.7,
+        target_top_p: float = 1.0,
         device: str = 'cpu',
         res_save_path: str = '../results/ica_openai.jsonl',
         log_path: str = '../logs/',
@@ -146,13 +165,21 @@ class ICAManager(BaseAttackManager):
 
         # Create configuration object
         self.config = ICAConfig(
+            data_path=data_path,
             attack_data_path=attack_data_path,
+            data_offset=data_offset,
+            image_root_in=image_root_in,
             target_model_path=target_model_path,
             target_model_name=target_model_name,
+            target_model_type=target_model_type,
             model_type=model_type,
             demo_num=demo_num,
             lang=lang,
             system_prompt=system_prompt,
+            target_system_prompt=target_system_prompt,
+            target_max_n_tokens=target_max_n_tokens,
+            target_temperature=target_temperature,
+            target_top_p=target_top_p,
             device=device,
             api_key=api_key,
             base_url=base_url,
@@ -175,13 +202,27 @@ class ICAManager(BaseAttackManager):
             setup_logger(log_file_path=self.config.log_path)
         
         logger.info(f"ICA Manager initialized with {len(self.attack_dataset)} attack examples")
-        logger.info(f"Using model type: {self.config.model_type}")
+        logger.info(f"Using model type: {self._target_model_type()}")
         logger.info(f"Target model: {self.config.target_model_name}")
+
+    def _target_model_type(self) -> str:
+        return self.config.target_model_type or self.config.model_type or "openai"
+
+    def _resolve_data_path(self) -> str:
+        data_path = self.config.data_path or self.config.attack_data_path
+        if not data_path:
+            raise ValueError("Missing dataset path: set `data_path` (or legacy `attack_data_path`).")
+        return data_path
     
     def _initialize_components(self) -> None:
         """Initialize all components needed for the attack."""
         # Load attack dataset
-        attack_dataset = AttackDataset(self.config.attack_data_path)
+        subset_slice = slice(self.config.data_offset, None) if self.config.data_offset else None
+        attack_dataset = AttackDataset(
+            self._resolve_data_path(),
+            subset_slice=subset_slice,
+            image_root_in=self.config.image_root_in,
+        )
         self.attack_dataset = attack_dataset
         
         # Initialize demo loader
@@ -189,7 +230,7 @@ class ICAManager(BaseAttackManager):
         
         # Initialize local model if needed
         self.target_model = load_model(
-            model_type=self.config.model_type,
+            model_type=self._target_model_type(),
             model_name=self.config.target_model_name,
             model_path=self.config.target_model_path,
             config=self.config
@@ -214,24 +255,40 @@ class ICAManager(BaseAttackManager):
         
         for example_idx, example in enumerate(tqdm(self.attack_dataset, desc="Executing ICA attack")):
             try:
-                # Generate attack prompt
-                raw_query = example.query
+                base_record = dict(example)
+                raw_query = (
+                    base_record.get("query")
+                    or base_record.get("prompt")
+                    or base_record.get("question")
+                    or base_record.get("instruction")
+                )
+                if not raw_query:
+                    continue
                 attack_prompt = self.generate_attack_prompt(raw_query)
                 
-                # Get model response based on model type
-                response = self.target_model.chat(attack_prompt)
+                input_message = build_messages(
+                    attack_prompt,
+                    inputs=base_record.get("inputs"),
+                    system_prompt=self.config.target_system_prompt or self.config.system_prompt,
+                )
+                response = self.target_model.chat(
+                    input_message,
+                    max_tokens=self.config.target_max_n_tokens,
+                    temperature=self.config.target_temperature,
+                    top_p=self.config.target_top_p,
+                )
 
-                # Log results
-                result_data = {
-                    'example_idx': example_idx,
-                    'query': raw_query,
-                    'final_query': attack_prompt,
-                    'response': response,
-                    'model_type': self.config.model_type,
-                    'model_name': self.config.target_model_name
-                }
+                result_data = dict(base_record)
+                result_data.update(
+                    {
+                        "example_idx": example_idx + self.config.data_offset,
+                        "query": raw_query,
+                        "final_query": attack_prompt,
+                        "response": response,
+                    }
+                )
                 
-                self.log(result_data, save=True)
+                self.save(result_data)
                 
             except Exception as e:
                 logger.error(f"Error processing example {example_idx}: {e}")

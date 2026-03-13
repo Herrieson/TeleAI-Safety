@@ -635,10 +635,21 @@ class MMLManager(BaseAttackManager):
         new_inputs["images"] = images
         return new_inputs
 
-    def _query_target(self, prompt: str, inputs: Optional[dict] = None, image_path: Optional[str] = None) -> str:
+    def _is_claude_target(self) -> bool:
         model_name = self.config.target_model_name or ""
         model_type = self.config.target_model_type or ""
-        if "claude" in model_name.lower() or "anthropic" in model_type.lower():
+        return "claude" in model_name.lower() or "anthropic" in model_type.lower()
+
+    def _query_target(self, prompt: str, inputs: Optional[dict] = None, image_path: Optional[str] = None) -> str:
+        if self._is_claude_target():
+            if image_path is None and isinstance(inputs, dict):
+                images = inputs.get("images") or inputs.get("image") or inputs.get("image_url")
+                if isinstance(images, str) and os.path.exists(images):
+                    image_path = images
+                elif isinstance(images, (list, tuple)):
+                    image_path = _pick_existing_path(
+                        [img for img in images if isinstance(img, str)]
+                    )
             if image_path is None:
                 raise ValueError("Claude path requires image_path input.")
             return self._query_claude(image_path, prompt)
@@ -762,7 +773,9 @@ class MMLManager(BaseAttackManager):
         )
         result_save_file = getattr(self.config, "res_save_path", None)
         if result_save_file:
-            os.makedirs(os.path.dirname(result_save_file), exist_ok=True)
+            save_dir = os.path.dirname(result_save_file)
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
         else:
             result_save_path = self.config.save_dir
             os.makedirs(result_save_path, exist_ok=True)
@@ -809,9 +822,13 @@ class MMLManager(BaseAttackManager):
 
             score_list = []
             res_list = []
+            source_image_path = transformed_image_path or self._resolve_source_image_path(item, inputs)
 
             for _ in range(self.config.max_attempts):
-                response = self._query_target(question, inputs=inputs)
+                if self._is_claude_target():
+                    response = self._query_target(question, inputs=inputs, image_path=source_image_path)
+                else:
+                    response = self._query_target(question, inputs=inputs)
 
                 if self.config.image_format not in ['images', 'images_figstep', 'images_qr']:
                     answer_index = response.find("Content") if response else -1
@@ -861,7 +878,7 @@ class MMLManager(BaseAttackManager):
                 except Exception:
                     pass
 
-        self._run_evaluation_logic(result_save_path)
+        self._run_evaluation_logic(result_save_file)
 
     def _run_evaluation_logic(self, path: str):
         print(f"[INFO] Evaluation step triggered for path: {path}")
@@ -870,7 +887,7 @@ class MMLManager(BaseAttackManager):
 
 def main():
     args = parse_arguments()
-    config_path = args.config_path or './configs/mml.yaml'
+    config_path = args.config_path or './configs/tutorial_mml.yaml'
     config_manager = ConfigManager(config_path=config_path)
     manager = MMLManager.from_config(config_manager.config)
     manager.attack()

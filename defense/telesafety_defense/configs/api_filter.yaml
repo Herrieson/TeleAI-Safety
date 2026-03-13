@@ -8,6 +8,7 @@ attack_data_path: "./attack_results"
 attack_types:
   - "gcg"
 target_model: "gpt-4o-mini"
+backend: "api"
 batch_size: 4
 save_results_dir: "./telesafety_defense/results/api"
 resume: true

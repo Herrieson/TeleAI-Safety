@@ -9,10 +9,8 @@ Based on the implementation from panda-guard framework.
 
 import os
 import sys
-import json
 import random
 import string
-import requests
 from typing import Optional, List, Dict, Any
 
 # Add current working directory to path for relative imports
@@ -28,15 +26,22 @@ from dataset import AttackDataset
 from utils import BaseAttackManager, ConfigManager, parse_arguments
 from models import load_model
 from logger import setup_logger
+from utils.message_builder import build_messages
 
 
 @dataclass
 class OverloadConfig:
     """Configuration class for Overload attack parameters."""
-    attack_data_path: str
-    target_model_path: str
-    target_model_name: str
-    model_type: str = 'local'  # openai, azure, local
+    data_path: Optional[str] = None
+    attack_data_path: Optional[str] = None
+    data_offset: int = 0
+    image_root_in: Optional[str] = None
+
+    target_model_path: str = ""
+    target_model_name: str = ""
+    target_model_type: str = 'local'  # openai, azure, local
+    model_type: Optional[str] = None  # backward-compatible alias
+    target_system_prompt: Optional[str] = None
     device: str = 'cuda'
     
     # API keys for different services
@@ -59,6 +64,10 @@ class OverloadConfig:
     # Evaluation parameters
     evaluator_type: str = "pattern"
     evaluator_path: str = "cais/HarmBench-Llama-2-13b-cls"
+
+    target_max_n_tokens: int = 512
+    target_temperature: float = 0.7
+    target_top_p: float = 1.0
     
     res_save_path: Optional[str] = None
     log_path: Optional[str] = None
@@ -183,10 +192,15 @@ class OverloadManager(BaseAttackManager):
     
     def __init__(
         self,
-        attack_data_path: str = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_path: Optional[str] = None,
+        attack_data_path: Optional[str] = "thu-coai/AISafetyLab_Datasets/harmbench_standard",
+        data_offset: int = 0,
+        image_root_in: Optional[str] = None,
         target_model_path: str = "lmsys/vicuna-7b-v1.5",
         target_model_name: str = "vicuna_1.5",
-        model_type: str = 'local',
+        target_model_type: str = 'local',
+        model_type: Optional[str] = None,
+        target_system_prompt: Optional[str] = None,
         device: str = 'cuda',
         dict_type: str = "all",
         random_dict: int = 30,
@@ -197,6 +211,9 @@ class OverloadManager(BaseAttackManager):
         mask_loc: str = "before",
         evaluator_type: str = "pattern",
         evaluator_path: str = "cais/HarmBench-Llama-2-13b-cls",
+        target_max_n_tokens: int = 512,
+        target_temperature: float = 0.7,
+        target_top_p: float = 1.0,
         res_save_path: str = "results/overload.jsonl",
         log_path: str = '../logs/',
         api_key: str = "",
@@ -213,10 +230,15 @@ class OverloadManager(BaseAttackManager):
 
         # Create configuration object
         self.config = OverloadConfig(
+            data_path=data_path,
             attack_data_path=attack_data_path,
+            data_offset=data_offset,
+            image_root_in=image_root_in,
             target_model_path=target_model_path,
             target_model_name=target_model_name,
+            target_model_type=target_model_type,
             model_type=model_type,
+            target_system_prompt=target_system_prompt,
             device=device,
             dict_type=dict_type,
             random_dict=random_dict,
@@ -227,6 +249,9 @@ class OverloadManager(BaseAttackManager):
             mask_loc=mask_loc,
             evaluator_type=evaluator_type,
             evaluator_path=evaluator_path,
+            target_max_n_tokens=target_max_n_tokens,
+            target_temperature=target_temperature,
+            target_top_p=target_top_p,
             api_key=api_key,
             base_url=base_url,
             azure_key=azure_key,
@@ -245,17 +270,30 @@ class OverloadManager(BaseAttackManager):
             setup_logger(log_file_path=self.config.log_path)
         
         logger.info(f"Overload Manager initialized with {len(self.attack_dataset)} attack examples")
-        logger.info(f"Using model type: {self.config.model_type}")
+        logger.info(f"Using model type: {self._target_model_type()}")
         logger.info(f"Target model: {self.config.target_model_name}")
+
+    def _target_model_type(self) -> str:
+        return self.config.target_model_type or self.config.model_type or "local"
+
+    def _resolve_data_path(self) -> str:
+        data_path = self.config.data_path or self.config.attack_data_path
+        if not data_path:
+            raise ValueError("Missing dataset path: set `data_path` (or legacy `attack_data_path`).")
+        return data_path
     
     def _initialize_components(self) -> None:
         """Initialize all components needed for the attack."""
-        # Load attack dataset
-        self.attack_dataset = AttackDataset(self.config.attack_data_path)
+        subset_slice = slice(self.config.data_offset, None) if self.config.data_offset else None
+        self.attack_dataset = AttackDataset(
+            self._resolve_data_path(),
+            subset_slice=subset_slice,
+            image_root_in=self.config.image_root_in,
+        )
                 
         # Initialize target model
         self.target_model = load_model(
-            model_type=self.config.model_type,
+            model_type=self._target_model_type(),
             model_name=self.config.target_model_name,
             model_path=self.config.target_model_path,
             config=self.config
@@ -283,7 +321,7 @@ class OverloadManager(BaseAttackManager):
         """Generate a mutated version of the query using overload method."""
         return self.generate_attack_prompt(query)
 
-    def attack_single(self, prompt: str) -> Dict[str, Any]:
+    def attack_single(self, prompt: str, inputs: Optional[dict] = None) -> Dict[str, Any]:
         """
         Attack a single prompt using overload method
         
@@ -297,19 +335,23 @@ class OverloadManager(BaseAttackManager):
             # Generate overloaded prompt
             overloaded_prompt = self.generate_attack_prompt(prompt)
             
-            # Get response from target model
-            response = self.target_model.chat(overloaded_prompt)
+            input_messages = build_messages(
+                overloaded_prompt,
+                inputs=inputs,
+                system_prompt=self.config.target_system_prompt or None,
+            )
+            response = self.target_model.chat(
+                input_messages,
+                max_tokens=self.config.target_max_n_tokens,
+                temperature=self.config.target_temperature,
+                top_p=self.config.target_top_p,
+            )
             logger.info(f"Overloaded prompt: {overloaded_prompt}")
 
-            
-
-            # Evaluate if the attack was successful
             result = {
-                "original_prompt": prompt,
-                "overloaded_prompt": overloaded_prompt,
+                "query": prompt,
+                "final_query": overloaded_prompt,
                 "response": response,
-                "method": "Overload",
-                "model": self.config.target_model_name
             }
             
             return result
@@ -319,11 +361,9 @@ class OverloadManager(BaseAttackManager):
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return {
-                "original_prompt": prompt,
-                "overloaded_prompt": "",
+                "query": prompt,
+                "final_query": "",
                 "response": "",
-                "method": "Overload",
-                "model": self.config.target_model_name,
                 "error": str(e)
             }
 
@@ -338,29 +378,31 @@ class OverloadManager(BaseAttackManager):
         
         for example_idx, example in enumerate(tqdm(self.attack_dataset, desc="Executing Overload attack")):
             try:
-                # Extract prompt from example
-                if hasattr(example, 'query'):
-                    prompt = example.query
-                elif hasattr(example, 'question'):
-                    prompt = example.question
-                elif hasattr(example, 'prompt'):
-                    prompt = example.prompt
-                elif isinstance(example, dict):
-                    prompt = example.get('query', example.get('question', example.get('prompt', str(example))))
-                else:
-                    prompt = str(example)
+                base_record = dict(example)
+                prompt = (
+                    base_record.get("query")
+                    or base_record.get("prompt")
+                    or base_record.get("question")
+                    or base_record.get("instruction")
+                )
+                if not prompt:
+                    continue
                 
                 # Perform attack
-                result = self.attack_single(prompt)
+                result = self.attack_single(prompt, inputs=base_record.get("inputs"))
                 
                 # Add metadata
-                result.update({
-                    "example_idx": example_idx,
-                    "total_examples": total_examples
-                })
+                output = dict(base_record)
+                output.update(result)
+                output.update(
+                    {
+                        "example_idx": example_idx + self.config.data_offset,
+                        "total_examples": total_examples,
+                    }
+                )
                 
                 # Log results
-                self.log(result, save=True)
+                self.save(output)
                 
                     
             except Exception as e:

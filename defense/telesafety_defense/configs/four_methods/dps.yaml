@@ -1,0 +1,7 @@
+defender_type: DPS
+
+# crop_mode: crop | random_crop | auto_crop
+crop_mode: "auto_crop"
+local_views: 3
+summary_word_limit: 20
+random_seed: 7

@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def load_records(path: str) -> List[Dict[str, Any]]:
@@ -22,9 +22,13 @@ def save_records(path: str, data: List[Dict[str, Any]]) -> None:
         json.dump(data, handle, indent=2, ensure_ascii=False)
 
 
-def extract_queries(data: List[Dict[str, Any]]) -> List[str]:
+def extract_queries(data: List[Dict[str, Any]], query_field: Optional[str] = None) -> List[str]:
     queries = []
     for item in data:
+        if query_field:
+            value = item.get(query_field, "")
+            queries.append("" if value is None else str(value))
+            continue
         if "final_query" in item:
             queries.append(item["final_query"])
         elif "final_prompt" in item:

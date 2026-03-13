@@ -42,6 +42,8 @@ KNOWN_ATTACKS = [
 
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
+ASR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr_labels")
+FRR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr_labels")
 
 
 def normalize_attack_name(name: str) -> str:
@@ -91,6 +93,18 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
         if abs_input.startswith(root + os.sep):
             rel = os.path.relpath(abs_input, root)
             break
+    # ASR/FRR report inputs are typically label files, prefer restoring model/attack.
+    if rel is None:
+        for label_root in (os.path.abspath(ASR_LABEL_DIR), os.path.abspath(FRR_LABEL_DIR)):
+            if abs_input.startswith(label_root + os.sep):
+                rel_labels = os.path.relpath(abs_input, label_root)
+                label_parts = rel_labels.split(os.sep)
+                if len(label_parts) >= 2:
+                    model = label_parts[0]
+                    attack = label_parts[1]
+                    return f"{model}/{attack}", model
+                rel = rel_labels
+                break
     if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):

@@ -1,0 +1,35 @@
+# Local/auto runtime config for four defense methods
+# - CourtGuard can run with backend=auto even without model_path (it can use its own detector/target backend)
+# - DPS / JailDAM / LLMLingua need runtime model backend, so set backend=local + model_path
+
+backend: "auto"
+# model_path: "./models/vicuna-7b-v1.5"
+model_path_env: "TELESAFETY_MODEL_PATH"
+
+max_new_tokens: 512
+temperature: 0.7
+do_sample: false
+log_level: "INFO"
+
+attack_data_path: "./attack_results"
+attack_types:
+  - "gcg"
+target_model: "vicuna-7b-v1.5"
+
+dataset:
+  strict_exists: true
+  items:
+    - name: "gcg_vicuna"
+      path: "./attack_results/gcg_vicuna-7b-v1.5.jsonl"
+      query_field: "final_query"
+
+batch_size: 4
+save_results_dir: "./telesafety_defense/results/four_methods"
+resume: true
+checkpoint_every: 20
+
+# Optional API backend
+# api_base_url: "https://api.openai.com/v1"
+# api_model_name: "gpt-4o-mini"
+# api_key_env: "OPENAI_API_KEY"
+# api_timeout: 120

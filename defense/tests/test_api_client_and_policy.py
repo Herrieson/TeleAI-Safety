@@ -6,6 +6,7 @@ from telesafety_defense.api_client import OpenAICompatibleChatClient
 from telesafety_defense.backend_policy import (
     DEFAULT_API_ALLOWED_DEFENDER_CLASSES,
     validate_api_defender_compatibility,
+    validate_pipeline_model_requirement,
 )
 
 
@@ -113,6 +114,29 @@ class APIClientAndPolicyTests(unittest.TestCase):
                 allowed_classes=DEFAULT_API_ALLOWED_DEFENDER_CLASSES,
                 defender_type="DRO",
             )
+
+    def test_api_policy_accepts_newly_marked_api_defenders(self):
+        defenders = [PassThroughDefender()]
+        for defender_type in (
+            "RPO",
+            "EraseCheck",
+            "BackdoorEnhancedAlignment",
+            "SmoothLLM",
+            "SemanticSmoothLLM",
+            "GuardReasoner",
+        ):
+            validate_api_defender_compatibility(
+                defenders,
+                allowed_classes=DEFAULT_API_ALLOWED_DEFENDER_CLASSES,
+                defender_type=defender_type,
+            )
+
+    def test_pipeline_model_requirement_rejects_missing_model(self):
+        with self.assertRaises(ValueError):
+            validate_pipeline_model_requirement("DRO", model=None)
+
+    def test_pipeline_model_requirement_allows_native_backend_only_defender(self):
+        validate_pipeline_model_requirement("CourtGuard", model=None)
 
 
 if __name__ == "__main__":

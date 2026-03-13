@@ -1,6 +1,33 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
 
 from telesafety_defense.io_store import extract_queries, load_records, save_records
 from telesafety_defense.resume_utils import load_existing_results, merge_existing_responses
@@ -15,10 +42,11 @@ def defend_chat(
     save_path: str = None,
     resume: bool = False,
     checkpoint_every: int = 0,
+    query_field: Optional[str] = None,
 ) -> Dict[str, Any]:
     logger.info("Loading data from: {}", data_path)
     data = load_records(data_path)
-    queries = extract_queries(data)
+    queries = extract_queries(data, query_field=query_field)
 
     if resume and save_path:
         existing = load_existing_results(save_path)

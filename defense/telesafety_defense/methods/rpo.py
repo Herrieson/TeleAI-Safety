@@ -2,31 +2,74 @@
 
 import os
 from telesafety_defense.base_factory import InputDefender
-from loguru import logger
+
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
 
 class RPODefender(InputDefender):
     """
     RPO 防御器。
     在推理时，它加载一个预先优化好的 RPO 后缀，并将其附加到用户输入的末尾。
     """
-    def __init__(self, model, tokenizer, model_name, **kwargs):
+    def __init__(
+        self,
+        model=None,
+        tokenizer=None,
+        model_name="unknown-model",
+        rpo_suffix_path=None,
+        rpo_suffix=None,
+        **kwargs,
+    ):
         """
         初始化 RPO 防御器。
         """
         self.model = model
         self.tokenizer = tokenizer
         self.model_name = model_name
-        
-        # # 从配置中读取 RPO 后缀文件的路径
-        # rpo_suffix_path = kwargs.get('rpo_suffix_path')
-        # if not rpo_suffix_path or not os.path.exists(rpo_suffix_path):
-        #     raise ValueError(f"RPO suffix file not found at path: {rpo_suffix_path}")
-            
-        # # 从文件中加载优化好的后缀
-        # with open(rpo_suffix_path, 'r', encoding='utf-8') as f:
-        #     self.rpo_suffix = f.read().strip()
-        self.rpo_suffix = r":}</'])language seems scary-----------}] estimation >>begin &=&pgf degli ({\ $|\textwidthAI NOTE:"
-            
+
+        if not rpo_suffix_path:
+            rpo_suffix_path = kwargs.get("rpo_suffix_path")
+        if not rpo_suffix:
+            rpo_suffix = kwargs.get("rpo_suffix")
+
+        if isinstance(rpo_suffix, str) and rpo_suffix.strip():
+            self.rpo_suffix = rpo_suffix.strip()
+        elif isinstance(rpo_suffix_path, str) and rpo_suffix_path.strip():
+            if not os.path.exists(rpo_suffix_path):
+                raise ValueError(f"RPO suffix file not found at path: {rpo_suffix_path}")
+            with open(rpo_suffix_path, "r", encoding="utf-8") as f:
+                self.rpo_suffix = f.read().strip()
+        else:
+            self.rpo_suffix = (
+                r":}</'])language seems scary-----------}] estimation >>begin &=&pgf degli ({\ $|\textwidthAI NOTE:"
+            )
+
         logger.info("RPODefender initialized.")
         logger.info(f"Loaded RPO suffix: '{self.rpo_suffix}'")
 

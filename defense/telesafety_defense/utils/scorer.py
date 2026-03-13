@@ -1,5 +1,27 @@
 from types import SimpleNamespace
-from loguru import logger
+
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
 
 class BaseScorer:
     def __init__(self):

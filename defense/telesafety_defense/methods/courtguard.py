@@ -10,6 +10,7 @@ Prompt-injection guard with two detector styles:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any, Iterable, List, Literal, Mapping, Sequence, cast
 
 from telesafety_defense.base_factory import OutputDefender
@@ -25,6 +26,9 @@ class AzureOpenAIBackend:
     endpoint: str
     deployment: str
     api_version: str = "2024-12-01-preview"
+    endpoint_env: str | None = None
+    deployment_env: str | None = None
+    api_version_env: str | None = None
     api_key_env: str | None = None
     api_key: str | None = None
     system_prompt: str | None = None
@@ -49,16 +53,40 @@ class LocalTransformersBackend:
 Backend = AzureOpenAIBackend | LocalTransformersBackend
 
 
+def _resolve_value_or_env(raw: Mapping[str, Any], key: str, env_key: str) -> str | None:
+    value = raw.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    env_name = raw.get(env_key)
+    if isinstance(env_name, str) and env_name.strip():
+        return os.environ.get(env_name.strip(), "").strip() or None
+    return None
+
+
 def _parse_backend(raw: Mapping[str, Any] | Backend) -> Backend:
     if isinstance(raw, (AzureOpenAIBackend, LocalTransformersBackend)):
         return raw
     backend_type = cast(str, raw.get("type", "azure_openai"))
     if backend_type == "azure_openai":
+        endpoint = _resolve_value_or_env(raw, "endpoint", "endpoint_env")
+        deployment = _resolve_value_or_env(raw, "deployment", "deployment_env")
+        api_version = _resolve_value_or_env(raw, "api_version", "api_version_env") or "2024-12-01-preview"
+        if not endpoint:
+            raise ValueError(
+                "CourtGuard azure_openai backend requires 'endpoint' or 'endpoint_env'."
+            )
+        if not deployment:
+            raise ValueError(
+                "CourtGuard azure_openai backend requires 'deployment' or 'deployment_env'."
+            )
         return AzureOpenAIBackend(
             type="azure_openai",
-            endpoint=cast(str, raw["endpoint"]),
-            deployment=cast(str, raw["deployment"]),
-            api_version=cast(str, raw.get("api_version", "2024-12-01-preview")),
+            endpoint=endpoint,
+            deployment=deployment,
+            api_version=api_version,
+            endpoint_env=cast(str | None, raw.get("endpoint_env")),
+            deployment_env=cast(str | None, raw.get("deployment_env")),
+            api_version_env=cast(str | None, raw.get("api_version_env")),
             api_key_env=cast(str | None, raw.get("api_key_env")),
             api_key=cast(str | None, raw.get("api_key")),
             system_prompt=cast(str | None, raw.get("system_prompt")),

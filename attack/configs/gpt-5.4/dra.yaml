@@ -1,5 +1,5 @@
 # Dataset
-attack_data_path: ./questions_with_category.json
+data_path: ../data/txt/teleai_samples_500_500.jsonl
 
 # Target model (Azure OpenAI deployment name)
 model_type: azure_openai

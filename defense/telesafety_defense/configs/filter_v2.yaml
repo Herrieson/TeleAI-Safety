@@ -4,6 +4,11 @@ generation:
   do_sample: false
 
 runtime:
+  # auto: defender model -> runtime.model_path -> api -> defender-native fallback
+  # local: runtime.model_path only
+  # api: api.* only
+  backend: "auto"
+  # model_path: "./models/vicuna-7b-v1.5"
   log_level: "INFO"
   batch_size: 4
   resume: true

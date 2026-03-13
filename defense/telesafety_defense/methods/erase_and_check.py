@@ -9,13 +9,63 @@ Arxiv link: https://arxiv.org/pdf/2309.02705
 Source repository: https://github.com/aounon/certified-llm-safety
 """
 
-from aisafetylab.models import LocalModel
-from aisafetylab.evaluation.scorers import PatternScorer
-from aisafetylab.defense.inference_defense.defender_texts import SORRY_RESPONSE
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+
+    class _StdLoggerAdapter:
+        def __init__(self, name: str):
+            self._logger = logging.getLogger(name)
+
+        @staticmethod
+        def _format(msg, *args):
+            if not args:
+                return msg
+            try:
+                return msg.format(*args)
+            except Exception:
+                return f"{msg} | args={args}"
+
+        def info(self, msg, *args):
+            self._logger.info(self._format(msg, *args))
+
+        def warning(self, msg, *args):
+            self._logger.warning(self._format(msg, *args))
+
+        def error(self, msg, *args):
+            self._logger.error(self._format(msg, *args))
+
+        def debug(self, msg, *args):
+            self._logger.debug(self._format(msg, *args))
+
+    logger = _StdLoggerAdapter(__name__)
 import random
 import tiktoken
 from telesafety_defense.base_factory import OutputDefender
+from telesafety_defense.utils.prompts import SORRY_RESPONSE
+
+
+class _DefaultPatternScorer:
+    """Fallback scorer used when external scorer dependencies are unavailable."""
+
+    _FAIL_PATTERNS = (
+        "I'm sorry",
+        "Sorry",
+        "I am sorry",
+        "I apologize",
+        "I cannot",
+        "I can't",
+        "As an AI",
+        "As a language model",
+    )
+
+    def score(self, query=None, response: str = ""):
+        text = response or ""
+        for pattern in self._FAIL_PATTERNS:
+            if pattern in text:
+                return {"score": 0}
+        return {"score": 1}
 
 
 class EraseCheckDefender(OutputDefender):
@@ -34,7 +84,7 @@ class EraseCheckDefender(OutputDefender):
 
     def __init__(
         self,
-        scorer=PatternScorer(),
+        scorer=None,
         max_erase=20,
         randomized=False,
         prompt_sampling_ratio=0.1,
@@ -43,18 +93,14 @@ class EraseCheckDefender(OutputDefender):
         tokenizer=None,
         model_name="vicuna-7b-v1.5",
     ):
-        self.scorer = scorer
+        self.scorer = scorer or _DefaultPatternScorer()
         self.max_erase = max_erase
         self.randomized = randomized
         self.prompt_sampling_ratio = prompt_sampling_ratio
         self.verbose = verbose
         self.model_name = model_name
-        self.model = None
-        if model is not None and tokenizer is not None:
-            if isinstance(model, LocalModel):
-                self.model = model
-            else:
-                self.model = LocalModel(model, tokenizer, model_name)
+        self.model = model
+        self.tokenizer = tokenizer
         logger.info(
             f"EraseCheckDefender initialized with scorer: {type(self.scorer).__name__}"
         )
@@ -73,8 +119,29 @@ class EraseCheckDefender(OutputDefender):
             if model_name:
                 return tiktoken.encoding_for_model(model_name)
         except Exception:
-            base = "o200k_base" if ("4o" in model_name) else "cl100k_base"
-            return tiktoken.get_encoding(base)
+            pass
+
+        lowered = (model_name or "").lower()
+        base = "o200k_base" if "4o" in lowered else "cl100k_base"
+        return tiktoken.get_encoding(base)
+
+    @staticmethod
+    def _score_value(score) -> float:
+        if isinstance(score, dict):
+            value = score.get("score", 0)
+        else:
+            value = score
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+
+    def _is_harmful_response(self, query: str, response: str) -> bool:
+        """
+        Scorer convention in this repo: score=1 indicates jailbreak/harmful output.
+        """
+        score = self.scorer.score(query=query, response=response)
+        return self._score_value(score) >= 1.0
 
     def erase_and_check_suffix(self, model, messages):
         """
@@ -88,14 +155,17 @@ class EraseCheckDefender(OutputDefender):
             bool: True if all truncated inputs are safe, False if any produce a harmful response.
         """
         user_prompt = messages[-1]["content"]
-        if isinstance(model, LocalModel):
-            self.tokenizer = model.tokenizer
+        model_tokenizer = getattr(model, "tokenizer", None)
+        if model_tokenizer is not None and hasattr(model_tokenizer, "decode"):
+            self.tokenizer = model_tokenizer
             tokens = self.tokenizer(user_prompt, add_special_tokens=False)["input_ids"]
+            decode_tokens = lambda ids: self.tokenizer.decode(ids, skip_special_tokens=True)
         else:
             self.tokenizer = self._get_encoder_for_azure_model_name(
                 getattr(model, "model_name", None)
             )
             tokens = self.tokenizer.encode(user_prompt)
+            decode_tokens = self.tokenizer.decode
 
         prompt_length = len(tokens)
 
@@ -109,7 +179,7 @@ class EraseCheckDefender(OutputDefender):
             if not truncated_tokens:
                 # No tokens left, skip
                 continue
-            truncated_prompt = self.tokenizer.decode(truncated_tokens)
+            truncated_prompt = decode_tokens(truncated_tokens)
             prompt_list.append(truncated_prompt)
 
         # If randomized, sample a subset of prompts
@@ -134,14 +204,12 @@ class EraseCheckDefender(OutputDefender):
                 }
             ]
             response = model.chat(truncated_messages)
-            response_score = self.scorer.score(
-                query=messages[-1]["content"], response=response
-            )["score"]
+            harmful = self._is_harmful_response(messages[-1]["content"], response)
             if self.verbose:
                 logger.info(f"Truncated Prompt {idx}: {truncated_prompt}")
                 logger.info(f"Response: {response}")
-                logger.info(f"Score: {response_score}")
-            if response_score == 0:
+                logger.info(f"Harmful: {harmful}")
+            if harmful:
                 # Response is harmful
                 if self.verbose:
                     logger.info("Harmful response detected with truncated prompt.")
@@ -173,13 +241,14 @@ class EraseCheckDefender(OutputDefender):
 
         # Generate the original response
         response = model.chat(messages)
-        response_score = self.scorer.score(query=messages[-1]["content"], response=response)
+        harmful = self._is_harmful_response(messages[-1]["content"], response)
 
         if self.verbose:
             logger.debug(f"Original Query: {messages[-1]['content']}")
             logger.debug(f"Original Response: {response}")
+            logger.debug(f"Harmful: {harmful}")
 
-        if response_score == 0:
+        if harmful:
             # Original response is harmful
             return SORRY_RESPONSE
 
