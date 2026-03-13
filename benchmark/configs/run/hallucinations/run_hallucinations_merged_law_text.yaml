@@ -13,6 +13,8 @@ model:
   api_key: "${AZURE_OPENAI_API_KEY}"
   azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
   api_version: "${AZURE_OPENAI_API_VERSION}"
+  api_mode: auto
+  api_fallback_order: [responses, chat_completions]
   temperature: 0
   max_tokens: 2048
   system_prompt: |
@@ -24,10 +26,12 @@ judge:
   type: llm
   model:
     type: azure_openai
-    deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+    deployment: gpt-5.4
     api_key: "${AZURE_OPENAI_API_KEY}"
     azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
     api_version: "${AZURE_OPENAI_API_VERSION}"
+    api_mode: auto
+    api_fallback_order: [responses, chat_completions]
     temperature: 0
     max_tokens: 1024
     token_param: max_completion_tokens
