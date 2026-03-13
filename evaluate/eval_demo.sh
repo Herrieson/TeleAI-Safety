@@ -2,8 +2,15 @@
 set -euo pipefail
 
 # 批量对 results/*.jsonl 运行多个 scorer，并将结果写入 evaluation_report/asr/<输入文件名>/ 下。
-# 默认只跑轻量方法（Pattern / Prefix）。如需更多 scorer，可通过环境变量 EVAL_SCORERS 覆盖，例如：
-#   EVAL_SCORERS="PatternScorer PrefixMatchScorer ClassficationScorer" ./eval_demo.sh
+# 默认仅跑 GPTScorer / DSV3Scorer。可通过环境变量 EVAL_SCORERS 覆盖，例如：
+#   EVAL_SCORERS="GPTScorer DSV3Scorer DSR1Scorer" ./eval_demo.sh
+#
+# 快速冒烟模式（推荐用于流程连通性检查）：
+#   EVAL_PROFILE=smoke ./eval_demo.sh
+# 默认行为：
+# - 只处理前 SMOKE_MAX_FILES 个输入（默认 2）
+# - 默认 scorer 仅使用 SMOKE_SCORERS（默认 PatternScorer）
+# - 跳过 MDS/Kappa/Ternary/Dashboard/Facts/FinalReport 重步骤
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
@@ -12,6 +19,9 @@ ASR_ROOT="${ROOT_DIR}/metrics/asr"
 RESULTS_DIR="${RESULTS_DIR:-${ROOT_DIR}/../data/attack_results}"
 RESULT_MANIFEST="${RESULT_MANIFEST:-}"
 EVAL_FILE_PARALLEL="${EVAL_FILE_PARALLEL:-4}"
+EVAL_PROFILE="${EVAL_PROFILE:-full}" # full | smoke
+SMOKE_MAX_FILES="${SMOKE_MAX_FILES:-2}"
+SMOKE_SCORERS="${SMOKE_SCORERS:-PatternScorer}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT_DIR}/evaluation_report/asr}"
 FRR_OUTPUT_ROOT="${FRR_OUTPUT_ROOT:-${ROOT_DIR}/evaluation_report/frr}"
 ASR_LABEL_ROOT="${ASR_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/asr_labels}"
@@ -23,9 +33,51 @@ fi
 if [[ ! "${EVAL_FILE_PARALLEL}" =~ ^[0-9]+$ ]] || ((EVAL_FILE_PARALLEL < 1)); then
   EVAL_FILE_PARALLEL=1
 fi
+if [[ "${EVAL_PROFILE}" != "full" && "${EVAL_PROFILE}" != "smoke" ]]; then
+  echo "EVAL_PROFILE must be full or smoke, got: ${EVAL_PROFILE}" >&2
+  exit 1
+fi
+if [[ ! "${SMOKE_MAX_FILES}" =~ ^[0-9]+$ ]] || ((SMOKE_MAX_FILES < 1)); then
+  echo "SMOKE_MAX_FILES must be a positive integer, got: ${SMOKE_MAX_FILES}" >&2
+  exit 1
+fi
+
+# 阶段开关：
+# - full 模式默认 true
+# - smoke 模式默认 false
+# - 若显式设置环境变量（true/false），优先使用用户值
+RUN_MDS="${RUN_MDS:-}"
+RUN_KAPPA="${RUN_KAPPA:-}"
+RUN_TERNARY="${RUN_TERNARY:-}"
+RUN_DASHBOARD="${RUN_DASHBOARD:-}"
+RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-}"
 
 # 默认 scorer 列表（按需扩展）
-DEFAULT_SCORERS=("PatternScorer" "PrefixMatchScorer" "ClassficationScorer" "GPTScorer" "GPT5Scorer" "DSV3Scorer" "DSR1Scorer" "MultiAPIScorer")
+DEFAULT_SCORERS=("GPTScorer" "DSV3Scorer")
+if [[ "${EVAL_PROFILE}" == "smoke" ]]; then
+  # shellcheck disable=SC2206
+  DEFAULT_SCORERS=(${SMOKE_SCORERS})
+  RUN_MDS="${RUN_MDS:-false}"
+  RUN_KAPPA="${RUN_KAPPA:-false}"
+  RUN_TERNARY="${RUN_TERNARY:-false}"
+  RUN_DASHBOARD="${RUN_DASHBOARD:-false}"
+  RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-false}"
+else
+  RUN_MDS="${RUN_MDS:-true}"
+  RUN_KAPPA="${RUN_KAPPA:-true}"
+  RUN_TERNARY="${RUN_TERNARY:-true}"
+  RUN_DASHBOARD="${RUN_DASHBOARD:-true}"
+  RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-true}"
+fi
+
+for stage_flag in RUN_MDS RUN_KAPPA RUN_TERNARY RUN_DASHBOARD RUN_FACTS_REPORT; do
+  stage_val="$(echo "${!stage_flag}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${stage_val}" != "true" && "${stage_val}" != "false" ]]; then
+    echo "${stage_flag} must be true or false, got: ${!stage_flag}" >&2
+    exit 1
+  fi
+  printf -v "${stage_flag}" '%s' "${stage_val}"
+done
 if [[ -n "${EVAL_SCORERS:-}" ]]; then
   # shellcheck disable=SC2206
   SCORERS=(${EVAL_SCORERS})
@@ -92,13 +144,41 @@ if [[ ${#filtered_result_files[@]} -eq 0 ]]; then
   exit 1
 fi
 
+if [[ "${EVAL_PROFILE}" == "smoke" && ${#filtered_result_files[@]} -gt "${SMOKE_MAX_FILES}" ]]; then
+  filtered_result_files=("${filtered_result_files[@]:0:${SMOKE_MAX_FILES}}")
+fi
+
 mkdir -p "${OUTPUT_ROOT}"
 mkdir -p "${FRR_OUTPUT_ROOT}"
 mkdir -p "${ASR_LABEL_ROOT}"
 mkdir -p "${FRR_LABEL_ROOT}"
 mkdir -p "${TERNARY_LABEL_ROOT}"
 
+echo "Eval profile: ${EVAL_PROFILE}"
+echo "Scorers: ${SCORERS[*]}"
+echo "Input files: ${#filtered_result_files[@]}"
+echo "Run stages: MDS=${RUN_MDS}, Kappa=${RUN_KAPPA}, Ternary=${RUN_TERNARY}, Dashboard=${RUN_DASHBOARD}, Facts+FinalReport=${RUN_FACTS_REPORT}"
+
 FRR_MODE="${EVAL_FRR_MODE:-llm}"
+ASR_SUCCESS_THRESHOLD="${ASR_SUCCESS_THRESHOLD:-2}"
+ASR_EMIT_EFFECTIVE_LABEL="${ASR_EMIT_EFFECTIVE_LABEL:-true}"
+FINAL_REPORT_ASR_LABEL_MODE="${FINAL_REPORT_ASR_LABEL_MODE:-strict}"
+
+if [[ "${ASR_SUCCESS_THRESHOLD}" != "1" && "${ASR_SUCCESS_THRESHOLD}" != "2" ]]; then
+  echo "ASR_SUCCESS_THRESHOLD must be 1 or 2, got: ${ASR_SUCCESS_THRESHOLD}" >&2
+  exit 1
+fi
+
+ASR_EMIT_EFFECTIVE_LABEL="$(echo "${ASR_EMIT_EFFECTIVE_LABEL}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${ASR_EMIT_EFFECTIVE_LABEL}" != "true" && "${ASR_EMIT_EFFECTIVE_LABEL}" != "false" ]]; then
+  echo "ASR_EMIT_EFFECTIVE_LABEL must be true or false, got: ${ASR_EMIT_EFFECTIVE_LABEL}" >&2
+  exit 1
+fi
+
+if [[ "${FINAL_REPORT_ASR_LABEL_MODE}" != "strict" && "${FINAL_REPORT_ASR_LABEL_MODE}" != "effective" && "${FINAL_REPORT_ASR_LABEL_MODE}" != "legacy" ]]; then
+  echo "FINAL_REPORT_ASR_LABEL_MODE must be strict/effective/legacy, got: ${FINAL_REPORT_ASR_LABEL_MODE}" >&2
+  exit 1
+fi
 
 process_one_result_file() {
   local json_path="$1"
@@ -136,7 +216,8 @@ process_one_result_file() {
       continue
     fi
     local metric_args_json
-    metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s"}}' "${scorer}" "${cfg}")
+    metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s","success_threshold":%s,"emit_effective_label":%s}}' \
+      "${scorer}" "${cfg}" "${ASR_SUCCESS_THRESHOLD}" "${ASR_EMIT_EFFECTIVE_LABEL}")
     if [[ ! -f "${asr_label_path}" ]]; then
       echo "Annotating ${scorer} on ${rel_path} -> ${asr_label_path}"
       uv run python evaluate_metrics.py \
@@ -203,9 +284,7 @@ wait_one_eval_slot() {
   local pid="${running_pids[0]}"
   local file_path="${running_files[0]}"
   local rc=0
-  if ! wait "${pid}"; then
-    rc=$?
-  fi
+  wait "${pid}" || rc=$?
   running_pids=("${running_pids[@]:1}")
   running_files=("${running_files[@]:1}")
   if ((rc == 0)); then
@@ -234,34 +313,42 @@ if ((${#failed_files[@]} > 0)); then
   exit 1
 fi
 
-# 生成所有模型的 MDS 汇总报告（基于 ASR evaluation_report 目录）
-MDS_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/mds"
-mkdir -p "${MDS_OUTPUT_DIR}"
-MDS_OUTPUT_PATH="${MDS_OUTPUT_DIR}/mds_report.txt"
-MDS_ARGS=$(printf '{"MDS":{"report_root":"%s","lambda_penalty":1.0}}' "${OUTPUT_ROOT}")
-uv run python evaluate_metrics.py \
-  --metrics="MDS" \
-  --metric_args="${MDS_ARGS}" \
-  --json_path="${filtered_result_files[0]}" \
-  --output_path="${MDS_OUTPUT_PATH}"
+if [[ "${RUN_MDS}" == "true" ]]; then
+  # 生成所有模型的 MDS 汇总报告（基于 ASR evaluation_report 目录）
+  MDS_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/mds"
+  mkdir -p "${MDS_OUTPUT_DIR}"
+  MDS_OUTPUT_PATH="${MDS_OUTPUT_DIR}/mds_report.txt"
+  MDS_ARGS=$(printf '{"MDS":{"report_root":"%s","lambda_penalty":1.0}}' "${OUTPUT_ROOT}")
+  uv run python evaluate_metrics.py \
+    --metrics="MDS" \
+    --metric_args="${MDS_ARGS}" \
+    --json_path="${filtered_result_files[0]}" \
+    --output_path="${MDS_OUTPUT_PATH}"
+else
+  echo "Skip MDS stage (RUN_MDS=${RUN_MDS})"
+fi
 
 # 计算平均各个 scorer 的平均 ASR 并总结到 csv，markdown 文件中
 echo "Summarizing reports in ${OUTPUT_ROOT}"
 uv run python report/summarize_reports.py
 
-# 生成 Kappa 一致性报告（基于 summary_wide.csv）
-KAPPA_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/kappa"
-mkdir -p "${KAPPA_OUTPUT_DIR}"
-KAPPA_OUTPUT_PATH="${KAPPA_OUTPUT_DIR}/kappa_report.csv"
-KAPPA_ARGS=$(printf '{"Kappa":{"input_csv":"%s","threshold":0.5,"min_raters":2,"include_rows":true}}' "${OUTPUT_ROOT}/summary_wide.csv")
-uv run python evaluate_metrics.py \
-  --metrics="Kappa" \
-  --metric_args="${KAPPA_ARGS}" \
-  --json_path="${filtered_result_files[0]}" \
-  --output_path="${KAPPA_OUTPUT_PATH}"
+if [[ "${RUN_KAPPA}" == "true" ]]; then
+  # 生成 Kappa 一致性报告（基于 summary_wide.csv）
+  KAPPA_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/kappa"
+  mkdir -p "${KAPPA_OUTPUT_DIR}"
+  KAPPA_OUTPUT_PATH="${KAPPA_OUTPUT_DIR}/kappa_report.csv"
+  KAPPA_ARGS=$(printf '{"Kappa":{"input_csv":"%s","threshold":0.5,"min_raters":2,"include_rows":true}}' "${OUTPUT_ROOT}/summary_wide.csv")
+  uv run python evaluate_metrics.py \
+    --metrics="Kappa" \
+    --metric_args="${KAPPA_ARGS}" \
+    --json_path="${filtered_result_files[0]}" \
+    --output_path="${KAPPA_OUTPUT_PATH}"
+else
+  echo "Skip Kappa stage (RUN_KAPPA=${RUN_KAPPA})"
+fi
 
 # 标注三分类标签
-if [[ ${#filtered_result_files[@]} -gt 0 ]]; then
+if [[ "${RUN_TERNARY}" == "true" && ${#filtered_result_files[@]} -gt 0 ]]; then
   if [[ -z "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
     echo "AZURE_OPENAI_DEPLOYMENT is required for ternary labeling." >&2
     exit 1
@@ -316,15 +403,28 @@ if [[ ${#filtered_result_files[@]} -gt 0 ]]; then
       uv run python metrics/cm_metrics.py --input "${ternary_label_path}"
     done
   fi
+else
+  echo "Skip ternary/bias/wsl/cm stages (RUN_TERNARY=${RUN_TERNARY})"
 fi
 
 # 生成最终的 evaluation dashboard 报告，包括可视化内容，但只包含数据，不包括 LLM 对数据的分析
-echo "Generating evaluation dashboard in ${ROOT_DIR}/evaluation_report"
-uv run python report/summary_dashboard.py
+if [[ "${RUN_DASHBOARD}" == "true" ]]; then
+  echo "Generating evaluation dashboard in ${ROOT_DIR}/evaluation_report"
+  uv run python report/summary_dashboard.py
+else
+  echo "Skip dashboard stage (RUN_DASHBOARD=${RUN_DASHBOARD})"
+fi
 
 # 生成结构化事实与深度评测报告（默认不调用 LLM）
-echo "Generating facts and deep report in ${ROOT_DIR}/evaluation_report"
-uv run python report/facts_builder.py
-echo "Exporting all metrics to one file in ${ROOT_DIR}/evaluation_report"
-uv run python report/export_all_metrics.py
-uv run python report/final_report.py --provider azure --model "${AZURE_OPENAI_DEPLOYMENT}"
+if [[ "${RUN_FACTS_REPORT}" == "true" ]]; then
+  echo "Generating facts and deep report in ${ROOT_DIR}/evaluation_report"
+  uv run python report/facts_builder.py
+  echo "Exporting all metrics to one file in ${ROOT_DIR}/evaluation_report"
+  uv run python report/export_all_metrics.py
+  uv run python report/final_report.py \
+    --provider azure \
+    --model "${AZURE_OPENAI_DEPLOYMENT}" \
+    --asr-label-mode "${FINAL_REPORT_ASR_LABEL_MODE}"
+else
+  echo "Skip facts/export/final_report stages (RUN_FACTS_REPORT=${RUN_FACTS_REPORT})"
+fi

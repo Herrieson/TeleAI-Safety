@@ -27,9 +27,14 @@ def parse_report(path: str) -> Optional[Dict[str, str]]:
         "skipped": r"^Skipped samples:\s*(\d+)$",
         "success": r"^Attack success samples:\s*(\d+)$",
         "asr": r"^Attack Success Rate \(ASR\):\s*([0-9.]+)",
+        "asr_strict": r"^Attack Success Rate \(ASR_strict\):\s*([0-9.]+)",
+        "asr_effective": r"^Attack Success Rate \(ASR_effective\):\s*([0-9.]+)",
         "avg_asr": r"^Average scorer ASR:\s*([0-9.eE+-]+)",
         "safe_total": r"^Safe samples \(label=0\):\s*(\d+)$",
         "frr": r"^False Refusal Rate \(FRR\):\s*([0-9.]+)",
+        "frr_invalid_rate": r"^Invalid Output Rate:\s*([0-9.]+)$",
+        "frr_invalid_samples": r"^Invalid output samples:\s*(\d+)$",
+        "frr_strict_total": r"^FRR denominator \(refusal\+non_refusal\):\s*(\d+)$",
     }
     values: Dict[str, str] = {}
     with open(path, "r", encoding="utf-8") as f:
@@ -46,9 +51,14 @@ def parse_report(path: str) -> Optional[Dict[str, str]]:
         return None
     # Some reports omit skipped; default to 0
     values.setdefault("skipped", "0")
+    values.setdefault("asr_strict", values.get("asr", ""))
+    values.setdefault("asr_effective", values.get("asr", ""))
     values.setdefault("avg_asr", "")
     values.setdefault("safe_total", "")
     values.setdefault("frr", "")
+    values.setdefault("frr_invalid_rate", "")
+    values.setdefault("frr_invalid_samples", "")
+    values.setdefault("frr_strict_total", "")
     values["report_path"] = path
     return values
 
@@ -94,7 +104,7 @@ def collect_frr_by_run() -> Dict[str, Dict[str, str]]:
     """
     Collect FRR report values keyed by attack_run.
     Returns mapping:
-      attack_run -> {"frr": "...", "safe_total": "...", "skipped": "..."}
+      attack_run -> {"frr": "...", "safe_total": "...", "skipped": "...", ...}
     """
     if not os.path.isdir(FRR_REPORT_DIR):
         return {}
@@ -102,6 +112,9 @@ def collect_frr_by_run() -> Dict[str, Dict[str, str]]:
         "input_file": r"^Input file:\s*(.+)$",
         "safe_total": r"^Total safe samples:\s*(\d+)$",
         "skipped": r"^Skipped samples:\s*(\d+)$",
+        "invalid_samples": r"^Invalid output samples:\s*(\d+)$",
+        "invalid_rate": r"^Invalid Output Rate:\s*([0-9.]+)$",
+        "frr_strict_total": r"^FRR denominator \(refusal\+non_refusal\):\s*(\d+)$",
         "frr": r"^False Refusal Rate \(FRR\):\s*([0-9.]+)$",
     }
     values_by_run: Dict[str, Dict[str, str]] = {}
@@ -146,8 +159,13 @@ def collect_reports() -> List[Dict[str, str]]:
                 "skipped_samples": parsed["skipped"],
                 "attack_success_samples": parsed["success"],
                 "asr": parsed["asr"],
+                "asr_strict": parsed.get("asr_strict", parsed["asr"]),
+                "asr_effective": parsed.get("asr_effective", parsed["asr"]),
                 "safe_samples": parsed.get("safe_total", ""),
                 "frr": parsed.get("frr", ""),
+                "frr_invalid_rate": parsed.get("frr_invalid_rate", ""),
+                "frr_invalid_samples": parsed.get("frr_invalid_samples", ""),
+                "frr_strict_total": parsed.get("frr_strict_total", ""),
                 "avg_asr": parsed.get("avg_asr", ""),
                 "input_file": parsed["input_file"],
                 "report_path": os.path.relpath(path, REPORT_DIR),
@@ -156,19 +174,31 @@ def collect_reports() -> List[Dict[str, str]]:
     return rows
 
 
-def compute_run_avg_asr(rows: List[Dict[str, str]]) -> Dict[str, str]:
-    """Compute average ASR across different scorers for each attack run."""
-    asr_by_run: Dict[str, List[float]] = defaultdict(list)
+def compute_run_avg_metric(rows: List[Dict[str, str]], field: str) -> Dict[str, str]:
+    """Compute average metric across different scorers for each attack run."""
+    metric_by_run: Dict[str, List[float]] = defaultdict(list)
     for row in rows:
         try:
-            asr_val = float(row["asr"])
+            metric_val = float(row[field])
         except (ValueError, TypeError):
             continue
-        asr_by_run[row["attack_run"]].append(asr_val)
-    return {run: f"{(sum(vals) / len(vals)):.4f}" for run, vals in asr_by_run.items() if vals}
+        metric_by_run[row["attack_run"]].append(metric_val)
+    return {run: f"{(sum(vals) / len(vals)):.4f}" for run, vals in metric_by_run.items() if vals}
 
 
-def write_long_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> None:
+def compute_run_avg_asr(rows: List[Dict[str, str]]) -> Dict[str, str]:
+    return compute_run_avg_metric(rows, "asr")
+
+
+def compute_run_avg_asr_effective(rows: List[Dict[str, str]]) -> Dict[str, str]:
+    return compute_run_avg_metric(rows, "asr_effective")
+
+
+def write_long_csv(
+    rows: List[Dict[str, str]],
+    run_avg_asr: Dict[str, str],
+    run_avg_asr_effective: Dict[str, str],
+) -> None:
     fieldnames = [
         "attack_run",
         "attack_group",
@@ -177,9 +207,15 @@ def write_long_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
         "skipped_samples",
         "attack_success_samples",
         "asr",
+        "asr_strict",
+        "asr_effective",
         "safe_samples",
         "frr",
+        "frr_invalid_rate",
+        "frr_invalid_samples",
+        "frr_strict_total",
         "avg_asr_all_scorers",
+        "avg_asr_effective_all_scorers",
         "input_file",
         "report_path",
     ]
@@ -190,26 +226,37 @@ def write_long_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
             row_out = dict(row)
             row_out.pop("avg_asr", None)  # remove per-scorer avg_asr to match fieldnames
             row_out["avg_asr_all_scorers"] = run_avg_asr.get(row["attack_run"], "")
+            row_out["avg_asr_effective_all_scorers"] = run_avg_asr_effective.get(row["attack_run"], "")
             writer.writerow(row_out)
 
 
-def write_wide_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> None:
+def write_wide_csv(
+    rows: List[Dict[str, str]],
+    run_avg_asr: Dict[str, str],
+    run_avg_asr_effective: Dict[str, str],
+) -> None:
     # Pivot attack_run -> scorer -> asr
     pivot: Dict[str, Dict[str, str]] = defaultdict(dict)
+    pivot_effective: Dict[str, Dict[str, str]] = defaultdict(dict)
     pivot_frr: Dict[str, Dict[str, str]] = defaultdict(dict)
+    pivot_frr_invalid_rate: Dict[str, Dict[str, str]] = defaultdict(dict)
     attack_groups: Dict[str, str] = {}
     scorers = set()
     for row in rows:
         run = row["attack_run"]
         pivot[run][row["scorer"]] = row["asr"]
+        pivot_effective[run][row["scorer"]] = row.get("asr_effective", "")
         pivot_frr[run][row["scorer"]] = row.get("frr", "")
+        pivot_frr_invalid_rate[run][row["scorer"]] = row.get("frr_invalid_rate", "")
         attack_groups[run] = row["attack_group"]
         scorers.add(row["scorer"])
     scorer_list = sorted(scorers)
     fieldnames = (
-        ["attack_run", "attack_group", "ASR_avg_all_scorers"]
+        ["attack_run", "attack_group", "ASR_avg_all_scorers", "ASR_effective_avg_all_scorers"]
         + [f"ASR_{s}" for s in scorer_list]
+        + [f"ASR_effective_{s}" for s in scorer_list]
         + [f"FRR_{s}" for s in scorer_list]
+        + [f"FRR_invalid_rate_{s}" for s in scorer_list]
     )
     with open(WIDE_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -219,14 +266,21 @@ def write_wide_csv(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
                 "attack_run": run,
                 "attack_group": attack_groups.get(run, ""),
                 "ASR_avg_all_scorers": run_avg_asr.get(run, ""),
+                "ASR_effective_avg_all_scorers": run_avg_asr_effective.get(run, ""),
             }
             for s in scorer_list:
                 row[f"ASR_{s}"] = pivot[run].get(s, "")
+                row[f"ASR_effective_{s}"] = pivot_effective[run].get(s, "")
                 row[f"FRR_{s}"] = pivot_frr[run].get(s, "")
+                row[f"FRR_invalid_rate_{s}"] = pivot_frr_invalid_rate[run].get(s, "")
             writer.writerow(row)
 
 
-def write_markdown(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> None:
+def write_markdown(
+    rows: List[Dict[str, str]],
+    run_avg_asr: Dict[str, str],
+    run_avg_asr_effective: Dict[str, str],
+) -> None:
     grouped: Dict[str, List[Dict[str, str]]] = defaultdict(list)
     for row in rows:
         grouped[row["attack_run"]].append(row)
@@ -234,14 +288,16 @@ def write_markdown(rows: List[Dict[str, str]], run_avg_asr: Dict[str, str]) -> N
     for attack_run in sorted(grouped.keys()):
         lines.append(f"## {attack_run}")
         lines.append("")
-        lines.append(f"Average ASR across scorers: {run_avg_asr.get(attack_run, '')}")
+        lines.append(f"Average ASR (strict/default) across scorers: {run_avg_asr.get(attack_run, '')}")
+        lines.append(f"Average ASR_effective across scorers: {run_avg_asr_effective.get(attack_run, '')}")
         lines.append("")
-        lines.append("| Scorer | ASR | FRR | Total | Success | Skipped | Safe | Report |")
-        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+        lines.append("| Scorer | ASR | ASR_strict | ASR_effective | FRR | InvalidRate | Total | Success | Skipped | Safe | Report |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
         for row in sorted(grouped[attack_run], key=lambda r: r["scorer"]):
             lines.append(
-                f"| {row['scorer']} | {row['asr']} | {row.get('frr', '')} | {row['total_samples']} | "
-                f"{row['attack_success_samples']} | {row['skipped_samples']} | {row.get('safe_samples', '')} | {row['report_path']} |"
+                f"| {row['scorer']} | {row['asr']} | {row.get('asr_strict', '')} | {row.get('asr_effective', '')} | "
+                f"{row.get('frr', '')} | {row.get('frr_invalid_rate', '')} | {row['total_samples']} | {row['attack_success_samples']} | "
+                f"{row['skipped_samples']} | {row.get('safe_samples', '')} | {row['report_path']} |"
             )
         lines.append("")
     with open(MARKDOWN, "w", encoding="utf-8") as f:
@@ -262,15 +318,22 @@ def main() -> None:
                 continue
             if not row.get("frr"):
                 row["frr"] = frr_values.get("frr", "")
+            if not row.get("frr_invalid_rate"):
+                row["frr_invalid_rate"] = frr_values.get("invalid_rate", "")
+            if not row.get("frr_invalid_samples"):
+                row["frr_invalid_samples"] = frr_values.get("invalid_samples", "")
+            if not row.get("frr_strict_total"):
+                row["frr_strict_total"] = frr_values.get("frr_strict_total", "")
             if not row.get("safe_samples"):
                 row["safe_samples"] = frr_values.get("safe_total", "")
             if not row.get("skipped_samples"):
                 row["skipped_samples"] = frr_values.get("skipped", "")
     run_avg_asr = compute_run_avg_asr(rows)
+    run_avg_asr_effective = compute_run_avg_asr_effective(rows)
     os.makedirs(REPORT_DIR, exist_ok=True)
-    write_long_csv(rows, run_avg_asr)
-    write_wide_csv(rows, run_avg_asr)
-    write_markdown(rows, run_avg_asr)
+    write_long_csv(rows, run_avg_asr, run_avg_asr_effective)
+    write_wide_csv(rows, run_avg_asr, run_avg_asr_effective)
+    write_markdown(rows, run_avg_asr, run_avg_asr_effective)
     print(f"Wrote {LONG_CSV}")
     print(f"Wrote {WIDE_CSV}")
     print(f"Wrote {MARKDOWN}")

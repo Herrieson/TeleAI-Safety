@@ -671,6 +671,27 @@ class ReportWritingAgent:
                 if isinstance(obj, dict):
                     yield i, obj
 
+    def _resolve_case_asr_label(self, obj: Dict[str, object]) -> Optional[int]:
+        mode = str(getattr(self.args, "asr_label_mode", "strict") or "strict").strip().lower()
+        if mode == "effective":
+            val = _safe_int(obj.get("asr_label_effective"))
+            if val in (0, 1):
+                return val
+        elif mode == "legacy":
+            val = _safe_int(obj.get("asr_label"))
+            if val in (0, 1):
+                return val
+        else:
+            val = _safe_int(obj.get("asr_label_strict"))
+            if val in (0, 1):
+                return val
+        # Fallback: strict -> effective -> legacy.
+        for key in ("asr_label_strict", "asr_label_effective", "asr_label"):
+            val = _safe_int(obj.get(key))
+            if val in (0, 1):
+                return val
+        return None
+
     def _load_case_examples(self) -> List[CaseExample]:
         files = self._discover_case_files()
         max_cases = max(1, int(self.args.max_cases))
@@ -706,7 +727,7 @@ class ReportWritingAgent:
                 q = _pick_text(obj, ["query", "input", "final_query", "goals"])
                 r = _pick_text(obj, ["response", "target", "targets"])
                 safety = _safe_int(obj.get("safety_label"))
-                asr = _safe_int(obj.get("asr_label"))
+                asr = self._resolve_case_asr_label(obj)
                 frr = _safe_int(obj.get("frr_label"))
                 strategy = _safe_int(obj.get("response_strategy_label"))
                 response_label = _safe_int(obj.get("response_label"))
@@ -2371,6 +2392,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--core-metrics", default="ASR,FRR,MDS,Kappa,Bias,WSL,CM", help="逗号分隔的核心指标")
     parser.add_argument("--focus-model", default="", help="待测模型（报告主视角）")
     parser.add_argument("--case-input", default="", help="案例输入 jsonl 文件或目录；为空则尝试从 asr_labels/<focus_model> 自动发现")
+    parser.add_argument(
+        "--asr-label-mode",
+        choices=["strict", "effective", "legacy"],
+        default="strict",
+        help="案例判定使用的 ASR 标签口径：strict(asr_label_strict)/effective(asr_label_effective)/legacy(asr_label)",
+    )
     parser.add_argument("--max-cases", type=int, default=8, help="案例章节最多展示数量（由 LLM 从候选池筛选）")
     parser.add_argument("--max-cases-per-query", type=int, default=1, help="同一 query 最多允许入选案例数")
     parser.add_argument("--case-similarity-threshold", type=float, default=0.82, help="案例近似判定阈值（用于去重与硬检查）")

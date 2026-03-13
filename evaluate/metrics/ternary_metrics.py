@@ -239,9 +239,6 @@ def annotate_jsonl(
         response = pick_field(obj, response_fields) or ""
         query = pick_field(obj, query_fields) or ""
         strategy_label = get_response_strategy_label(obj)
-        existing_response_label = obj.get("response_label")
-        if isinstance(existing_response_label, int) and existing_response_label != -1:
-            return index, dict(obj)
         if strategy_label == -1:
             return index, {**obj, "response_strategy_label": strategy_label, "response_label": -1}
         image_paths = extract_image_paths(obj, input_path, image_roots)
