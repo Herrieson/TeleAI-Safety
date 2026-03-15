@@ -51,9 +51,20 @@ RUN_KAPPA="${RUN_KAPPA:-}"
 RUN_TERNARY="${RUN_TERNARY:-}"
 RUN_DASHBOARD="${RUN_DASHBOARD:-}"
 RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-}"
+RUN_LEGACY_ASR="${RUN_LEGACY_ASR:-}"
 
 # 默认 scorer 列表（按需扩展）
-DEFAULT_SCORERS=("GPTScorer" "DSV3Scorer")
+# full 模式支持通过 EVAL_SCORER_PROFILE 选择内置组合：
+#   - fast:     GPTScorer + DSV3Scorer（速度优先）
+#   - balanced: GPTScorer + DSV3Scorer + GPT5Scorer（默认）
+#   - robust:   GPTScorer + DSV3Scorer + GPT5Scorer（稳健优先）
+# 可选扩展：
+#   - EVAL_INCLUDE_DSR1=true 时，在 robust 方案中追加 DSR1Scorer
+EVAL_SCORER_PROFILE="${EVAL_SCORER_PROFILE:-balanced}"
+EVAL_INCLUDE_DSR1="${EVAL_INCLUDE_DSR1:-false}"
+FAST_SCORERS=("GPTScorer" "DSV3Scorer")
+BALANCED_SCORERS=("GPTScorer" "DSV3Scorer" "GPT5Scorer")
+ROBUST_SCORERS=("GPTScorer" "DSV3Scorer" "GPT5Scorer")
 if [[ "${EVAL_PROFILE}" == "smoke" ]]; then
   # shellcheck disable=SC2206
   DEFAULT_SCORERS=(${SMOKE_SCORERS})
@@ -62,15 +73,40 @@ if [[ "${EVAL_PROFILE}" == "smoke" ]]; then
   RUN_TERNARY="${RUN_TERNARY:-false}"
   RUN_DASHBOARD="${RUN_DASHBOARD:-false}"
   RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-false}"
+  RUN_LEGACY_ASR="${RUN_LEGACY_ASR:-false}"
 else
   RUN_MDS="${RUN_MDS:-true}"
   RUN_KAPPA="${RUN_KAPPA:-true}"
   RUN_TERNARY="${RUN_TERNARY:-true}"
   RUN_DASHBOARD="${RUN_DASHBOARD:-true}"
   RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-true}"
+  RUN_LEGACY_ASR="${RUN_LEGACY_ASR:-true}"
+  case "${EVAL_SCORER_PROFILE}" in
+    fast)
+      DEFAULT_SCORERS=("${FAST_SCORERS[@]}")
+      ;;
+    balanced)
+      DEFAULT_SCORERS=("${BALANCED_SCORERS[@]}")
+      ;;
+    robust)
+      DEFAULT_SCORERS=("${ROBUST_SCORERS[@]}")
+      EVAL_INCLUDE_DSR1="$(echo "${EVAL_INCLUDE_DSR1}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${EVAL_INCLUDE_DSR1}" != "true" && "${EVAL_INCLUDE_DSR1}" != "false" ]]; then
+        echo "EVAL_INCLUDE_DSR1 must be true or false, got: ${EVAL_INCLUDE_DSR1}" >&2
+        exit 1
+      fi
+      if [[ "${EVAL_INCLUDE_DSR1}" == "true" ]]; then
+        DEFAULT_SCORERS+=("DSR1Scorer")
+      fi
+      ;;
+    *)
+      echo "EVAL_SCORER_PROFILE must be fast/balanced/robust, got: ${EVAL_SCORER_PROFILE}" >&2
+      exit 1
+      ;;
+  esac
 fi
 
-for stage_flag in RUN_MDS RUN_KAPPA RUN_TERNARY RUN_DASHBOARD RUN_FACTS_REPORT; do
+for stage_flag in RUN_MDS RUN_KAPPA RUN_TERNARY RUN_DASHBOARD RUN_FACTS_REPORT RUN_LEGACY_ASR; do
   stage_val="$(echo "${!stage_flag}" | tr '[:upper:]' '[:lower:]')"
   if [[ "${stage_val}" != "true" && "${stage_val}" != "false" ]]; then
     echo "${stage_flag} must be true or false, got: ${!stage_flag}" >&2
@@ -85,6 +121,25 @@ else
   SCORERS=("${DEFAULT_SCORERS[@]}")
 fi
 
+# 去重并移除空项（保序）
+declare -A _seen_scorer=()
+uniq_scorers=()
+for scorer in "${SCORERS[@]}"; do
+  if [[ -z "${scorer}" ]]; then
+    continue
+  fi
+  if [[ -n "${_seen_scorer[${scorer}]:-}" ]]; then
+    continue
+  fi
+  _seen_scorer["${scorer}"]=1
+  uniq_scorers+=("${scorer}")
+done
+SCORERS=("${uniq_scorers[@]}")
+if [[ ${#SCORERS[@]} -eq 0 ]]; then
+  echo "No scorers configured after parsing EVAL_SCORERS / profile." >&2
+  exit 1
+fi
+
 # 配置文件映射
 declare -A CONFIG_MAP=(
   ["PatternScorer"]="${ASR_ROOT}/config/pattern_scorer.yaml"
@@ -94,8 +149,14 @@ declare -A CONFIG_MAP=(
   ["GPT5Scorer"]="${ASR_ROOT}/config/gpt5_scorer.yaml"
   ["DSV3Scorer"]="${ASR_ROOT}/config/dsv3_scorer.yaml"
   ["DSR1Scorer"]="${ASR_ROOT}/config/dsr1_scorer.yaml"
-  ["MultiAPIScorer"]="${ASR_ROOT}/config/multi_api_scorer.yaml"
 )
+
+declare -A LEGACY_CONFIG_MAP=(
+  ["GPTScorer"]="${ASR_ROOT}/config/gpt_scorer_legacy.yaml"
+  ["DSV3Scorer"]="${ASR_ROOT}/config/dsv3_scorer_legacy.yaml"
+  ["GPT5Scorer"]="${ASR_ROOT}/config/gpt5_scorer_legacy.yaml"
+)
+LEGACY_SCORERS=("GPTScorer" "DSV3Scorer" "GPT5Scorer")
 
 if [[ -n "${RESULT_MANIFEST}" ]]; then
   if [[ ! -f "${RESULT_MANIFEST}" ]]; then
@@ -157,7 +218,7 @@ mkdir -p "${TERNARY_LABEL_ROOT}"
 echo "Eval profile: ${EVAL_PROFILE}"
 echo "Scorers: ${SCORERS[*]}"
 echo "Input files: ${#filtered_result_files[@]}"
-echo "Run stages: MDS=${RUN_MDS}, Kappa=${RUN_KAPPA}, Ternary=${RUN_TERNARY}, Dashboard=${RUN_DASHBOARD}, Facts+FinalReport=${RUN_FACTS_REPORT}"
+echo "Run stages: LegacyASR=${RUN_LEGACY_ASR}, MDS=${RUN_MDS}, Kappa=${RUN_KAPPA}, Ternary=${RUN_TERNARY}, Dashboard=${RUN_DASHBOARD}, Facts+FinalReport=${RUN_FACTS_REPORT}"
 
 FRR_MODE="${EVAL_FRR_MODE:-llm}"
 ASR_SUCCESS_THRESHOLD="${ASR_SUCCESS_THRESHOLD:-2}"
@@ -238,6 +299,48 @@ process_one_result_file() {
       --json_path="${asr_label_path}" \
       --output_path="${out_path}"
   done
+
+  if [[ "${RUN_LEGACY_ASR}" == "true" ]]; then
+    for legacy_scorer in "${LEGACY_SCORERS[@]}"; do
+      local legacy_cfg="${LEGACY_CONFIG_MAP[${legacy_scorer}]:-}"
+      if [[ -z "${legacy_cfg}" || ! -f "${legacy_cfg}" ]]; then
+        echo "Skip legacy ${legacy_scorer} on ${rel_path}: legacy config not found ${legacy_cfg}" >&2
+        continue
+      fi
+      local legacy_out_path="${output_dir}/${base_name}_legacy_${legacy_scorer}.txt"
+      local legacy_asr_label_path="${asr_label_dir}/${base_name}_${legacy_scorer}_legacy.jsonl"
+      local legacy_report_exists=0
+      if [[ -f "${legacy_out_path}" ]]; then
+        legacy_report_exists=1
+      fi
+      if [[ ${legacy_report_exists} -eq 1 && -f "${legacy_asr_label_path}" ]]; then
+        echo "Skip legacy ${legacy_scorer} on ${rel_path}: report and labels already exist"
+        continue
+      fi
+      local legacy_metric_args_json
+      legacy_metric_args_json=$(printf '{"ASR":{"scorer_name":"%s","config_path":"%s","success_threshold":%s,"emit_effective_label":%s}}' \
+        "${legacy_scorer}" "${legacy_cfg}" "${ASR_SUCCESS_THRESHOLD}" "${ASR_EMIT_EFFECTIVE_LABEL}")
+      if [[ ! -f "${legacy_asr_label_path}" ]]; then
+        echo "Annotating legacy ${legacy_scorer} on ${rel_path} -> ${legacy_asr_label_path}"
+        uv run python evaluate_metrics.py \
+          --metrics="ASR" \
+          --metric_args="${legacy_metric_args_json}" \
+          --json_path="${json_path}" \
+          --prediction_output_path="${legacy_asr_label_path}" \
+          --annotate_only
+      fi
+      if [[ ${legacy_report_exists} -eq 0 ]]; then
+        echo "Running legacy ${legacy_scorer} on ${rel_path}"
+        uv run python evaluate_metrics.py \
+          --metrics="ASR" \
+          --metric_args="${legacy_metric_args_json}" \
+          --json_path="${legacy_asr_label_path}" \
+          --output_path="${legacy_out_path}"
+      else
+        echo "Skip legacy report ${legacy_scorer} on ${rel_path}: output already exists"
+      fi
+    done
+  fi
 
   local frr_out_dir="${FRR_OUTPUT_ROOT}/${rel_no_ext}"
   local frr_label_dir="${FRR_LABEL_ROOT}/${rel_no_ext}"

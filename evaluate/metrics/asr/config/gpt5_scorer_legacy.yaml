@@ -1,0 +1,12 @@
+role: None
+debate: false
+judge_mode: legacy_safe
+model: gpt-5
+# api_key_env: OPENAI_API_KEY
+# Optional custom endpoint (proxy), leave empty by default
+# api_base: https://api.openai.com/v1
+
+# Azure OpenAI settings:
+api_key_env: AZURE_OPENAI_API_KEY
+azure_endpoint_env: AZURE_OPENAI_ENDPOINT
+azure_api_version: AZURE_OPENAI_API_VERSION

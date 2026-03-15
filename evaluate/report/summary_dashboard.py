@@ -11,23 +11,38 @@ ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", 
 DEFAULT_INPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "summary_long.csv")
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_overview.md")
 DEFAULT_MDS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "mds")
-DEFAULT_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap.png")
-DEFAULT_FRR_HEATMAP = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap_frr.png")
-DEFAULT_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png")
-DEFAULT_ATTACK_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png")
-DEFAULT_BIAS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_bias.png")
-DEFAULT_WSL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_wsl.png")
-DEFAULT_CM_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_cm.png")
-DEFAULT_MDS_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_mds.png")
-DEFAULT_FRR_MODEL_BAR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models_frr.png")
+DEFAULT_PLOTS_ROOT = os.path.join(PROJECT_ROOT, "evaluation_report", "plots")
+DEFAULT_HEATMAP = os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "asr_strict_model_attack.png")
+DEFAULT_EFFECTIVE_HEATMAP = os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "asr_effective_model_attack.png")
+DEFAULT_LEGACY_HEATMAP = os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "asr_legacy_model_attack.png")
+DEFAULT_FRR_HEATMAP = os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "frr_strict_model_attack.png")
+DEFAULT_FRR_EFFECTIVE_HEATMAP = os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "frr_effective_model_attack.png")
+DEFAULT_MODEL_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_strict_model_avg.png")
+DEFAULT_MODEL_BAR_EFFECTIVE = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_effective_model_avg.png")
+DEFAULT_LEGACY_MODEL_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_legacy_model_avg.png")
+DEFAULT_ATTACK_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_strict_attack_avg.png")
+DEFAULT_ATTACK_BAR_EFFECTIVE = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_effective_attack_avg.png")
+DEFAULT_LEGACY_ATTACK_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_legacy_attack_avg.png")
+DEFAULT_BIAS_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "metric_bias_model_avg.png")
+DEFAULT_WSL_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "metric_wsl_model_avg.png")
+DEFAULT_CM_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "metric_cm_model_avg.png")
+DEFAULT_MDS_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "metric_mds_model_avg.png")
+DEFAULT_FRR_MODEL_BAR = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "frr_strict_model_avg.png")
+DEFAULT_FRR_MODEL_BAR_EFFECTIVE = os.path.join(DEFAULT_PLOTS_ROOT, "bar", "frr_effective_model_avg.png")
 DEFAULT_FRR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
-DEFAULT_RADAR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "summary_radar")
-DEFAULT_RADAR_FILE = "summary_radar_all.png"
+DEFAULT_RADAR_DIR = os.path.join(DEFAULT_PLOTS_ROOT, "radar")
+DEFAULT_RADAR_FILE = "all_models_attacks.png"
 DEFAULT_TIERED_DASHBOARD = os.path.join(
-    PROJECT_ROOT, "evaluation_report", "summary_tiered_dashboard.png"
+    DEFAULT_PLOTS_ROOT, "dashboard", "tiered_strict.png"
+)
+DEFAULT_TIERED_DASHBOARD_EFFECTIVE = os.path.join(
+    DEFAULT_PLOTS_ROOT, "dashboard", "tiered_effective.png"
 )
 DEFAULT_EXEC_SUMMARY = os.path.join(
-    PROJECT_ROOT, "evaluation_report", "summary_exec_overview.png"
+    DEFAULT_PLOTS_ROOT, "dashboard", "exec_overview_strict.png"
+)
+DEFAULT_EXEC_SUMMARY_EFFECTIVE = os.path.join(
+    DEFAULT_PLOTS_ROOT, "dashboard", "exec_overview_effective.png"
 )
 DEFAULT_BIAS_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "bias")
 DEFAULT_WSL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "wsl")
@@ -50,6 +65,10 @@ KNOWN_ATTACKS = [
 
 def normalize_attack_name(name: str) -> str:
     return name.replace("_", "")
+
+
+def is_legacy_scorer_name(scorer: str) -> bool:
+    return "legacy" in (scorer or "").lower()
 
 
 def split_attack_and_model(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -117,9 +136,14 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
 
 def read_summary_long(
     path: str,
-    frr_by_run: Optional[Dict[str, float]] = None,
-) -> Tuple[Dict[Tuple[str, str], Dict[str, object]], List[str]]:
+    frr_by_run: Optional[Dict[str, Dict[str, float]]] = None,
+) -> Tuple[
+    Dict[Tuple[str, str], Dict[str, object]],
+    Dict[Tuple[str, str], Dict[str, object]],
+    List[str],
+]:
     groups: Dict[Tuple[str, str], Dict[str, object]] = {}
+    legacy_groups: Dict[Tuple[str, str], Dict[str, object]] = {}
     unparsed: List[str] = []
 
     with open(path, "r", encoding="utf-8") as f:
@@ -133,11 +157,15 @@ def read_summary_long(
                 continue
             model, attack = parsed
             key = (model, attack)
-            group = groups.setdefault(
+            scorer = (row.get("scorer") or "").strip()
+            target_groups = legacy_groups if is_legacy_scorer_name(scorer) else groups
+            group = target_groups.setdefault(
                 key,
                 {
                     "asr_vals": [],
+                    "asr_effective_vals": [],
                     "frr_vals": [],
+                    "frr_effective_vals": [],
                     "scorers": set(),
                     "total_samples": set(),
                     "skipped_samples": set(),
@@ -150,8 +178,15 @@ def read_summary_long(
             except (TypeError, ValueError):
                 continue
             group["asr_vals"].append(asr_val)
+            asr_effective_raw = row.get("asr_effective", "")
+            try:
+                asr_effective_val = float(asr_effective_raw)
+            except (TypeError, ValueError):
+                asr_effective_val = asr_val
+            group["asr_effective_vals"].append(asr_effective_val)
 
             frr_val = None
+            frr_invalid_rate = None
             frr_raw = row.get("frr", "")
             if frr_raw:
                 try:
@@ -159,11 +194,27 @@ def read_summary_long(
                 except (TypeError, ValueError):
                     frr_val = None
             elif frr_by_run:
-                frr_val = frr_by_run.get(attack_run)
+                frr_fallback = frr_by_run.get(attack_run)
+                if isinstance(frr_fallback, dict):
+                    frr_val = frr_fallback.get("frr")
+            frr_invalid_rate_raw = row.get("frr_invalid_rate", "")
+            if frr_invalid_rate_raw:
+                try:
+                    frr_invalid_rate = float(frr_invalid_rate_raw)
+                except (TypeError, ValueError):
+                    frr_invalid_rate = None
+            elif frr_by_run:
+                frr_fallback = frr_by_run.get(attack_run)
+                if isinstance(frr_fallback, dict):
+                    frr_invalid_rate = frr_fallback.get("invalid_rate")
             if frr_val is not None:
                 group["frr_vals"].append(frr_val)
+                if isinstance(frr_invalid_rate, float):
+                    frr_effective_val = frr_val + frr_invalid_rate * (1.0 - frr_val)
+                else:
+                    frr_effective_val = frr_val
+                group["frr_effective_vals"].append(min(1.0, max(0.0, frr_effective_val)))
 
-            scorer = row.get("scorer")
             if scorer:
                 group["scorers"].add(scorer)
 
@@ -175,16 +226,17 @@ def read_summary_long(
             if skipped and skipped.isdigit():
                 group["skipped_samples"].add(int(skipped))
 
-    return groups, unparsed
+    return groups, legacy_groups, unparsed
 
 
-def read_frr_reports(frr_dir: str) -> Dict[str, float]:
+def read_frr_reports(frr_dir: str) -> Dict[str, Dict[str, float]]:
     if not os.path.isdir(frr_dir):
         return {}
 
-    def parse_report(path: str) -> Optional[Tuple[str, float]]:
+    def parse_report(path: str) -> Optional[Tuple[str, Dict[str, float]]]:
         input_file = None
         frr_val = None
+        invalid_rate = None
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -195,12 +247,20 @@ def read_frr_reports(frr_dir: str) -> Dict[str, float]:
                         frr_val = float(line.split(":", 1)[1].strip())
                     except ValueError:
                         frr_val = None
+                elif line.startswith("Invalid Output Rate:"):
+                    try:
+                        invalid_rate = float(line.split(":", 1)[1].strip())
+                    except ValueError:
+                        invalid_rate = None
         if input_file and frr_val is not None:
             attack_run, _ = derive_attack_run(input_file)
-            return attack_run, frr_val
+            out: Dict[str, float] = {"frr": frr_val}
+            if isinstance(invalid_rate, float):
+                out["invalid_rate"] = invalid_rate
+            return attack_run, out
         return None
 
-    frr_by_run: Dict[str, float] = {}
+    frr_by_run: Dict[str, Dict[str, float]] = {}
     for root, _, files in os.walk(frr_dir):
         for fname in files:
             if not fname.endswith(".txt"):
@@ -209,8 +269,8 @@ def read_frr_reports(frr_dir: str) -> Dict[str, float]:
             parsed = parse_report(path)
             if not parsed:
                 continue
-            attack_run, frr_val = parsed
-            frr_by_run[attack_run] = frr_val
+            attack_run, values = parsed
+            frr_by_run[attack_run] = values
     return frr_by_run
 
 
@@ -218,11 +278,23 @@ def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[
     rows: List[Dict[str, str]] = []
     for (model, attack), data in groups.items():
         asr_vals: List[float] = data["asr_vals"]
+        asr_effective_vals: List[float] = data["asr_effective_vals"]
         frr_vals: List[float] = data["frr_vals"]
+        frr_effective_vals: List[float] = data["frr_effective_vals"]
         if not asr_vals:
             continue
         avg_asr = sum(asr_vals) / len(asr_vals)
+        avg_asr_effective = (
+            sum(asr_effective_vals) / len(asr_effective_vals)
+            if asr_effective_vals
+            else avg_asr
+        )
         avg_frr = sum(frr_vals) / len(frr_vals) if frr_vals else None
+        avg_frr_effective = (
+            sum(frr_effective_vals) / len(frr_effective_vals)
+            if frr_effective_vals
+            else avg_frr
+        )
         scorers: Set[str] = data["scorers"]
         total_samples: Set[int] = data["total_samples"]
 
@@ -238,7 +310,9 @@ def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[
                 "model": model,
                 "attack": attack,
                 "avg_asr": f"{avg_asr:.4f}",
+                "avg_asr_effective": f"{avg_asr_effective:.4f}",
                 "avg_frr": f"{avg_frr:.4f}" if avg_frr is not None else "",
+                "avg_frr_effective": f"{avg_frr_effective:.4f}" if avg_frr_effective is not None else "",
                 "num_scorers": str(len(scorers)) if scorers else "",
                 "total_samples": total_str,
             }
@@ -248,7 +322,9 @@ def format_group_rows(groups: Dict[Tuple[str, str], Dict[str, object]]) -> List[
 
 def format_model_summary(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
     model_asr_vals: Dict[str, List[float]] = {}
+    model_asr_effective_vals: Dict[str, List[float]] = {}
     model_frr_vals: Dict[str, List[float]] = {}
+    model_frr_effective_vals: Dict[str, List[float]] = {}
     for row in rows:
         try:
             asr_val = float(row["avg_asr"])
@@ -256,22 +332,43 @@ def format_model_summary(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
             continue
         model_asr_vals.setdefault(row["model"], []).append(asr_val)
         try:
+            asr_effective_val = float(row.get("avg_asr_effective", ""))
+        except (TypeError, ValueError):
+            asr_effective_val = asr_val
+        model_asr_effective_vals.setdefault(row["model"], []).append(asr_effective_val)
+        try:
             frr_val = float(row.get("avg_frr", ""))
         except (TypeError, ValueError):
             frr_val = None
         if frr_val is not None:
             model_frr_vals.setdefault(row["model"], []).append(frr_val)
+        try:
+            frr_effective_val = float(row.get("avg_frr_effective", ""))
+        except (TypeError, ValueError):
+            frr_effective_val = frr_val
+        if frr_effective_val is not None:
+            model_frr_effective_vals.setdefault(row["model"], []).append(frr_effective_val)
 
     summary = []
     for model, vals in sorted(model_asr_vals.items()):
         avg_asr = sum(vals) / len(vals)
+        asr_effective_vals = model_asr_effective_vals.get(model, vals)
+        avg_asr_effective = sum(asr_effective_vals) / len(asr_effective_vals) if asr_effective_vals else avg_asr
         frr_vals = model_frr_vals.get(model, [])
         avg_frr = sum(frr_vals) / len(frr_vals) if frr_vals else None
+        frr_effective_vals = model_frr_effective_vals.get(model, [])
+        avg_frr_effective = (
+            sum(frr_effective_vals) / len(frr_effective_vals)
+            if frr_effective_vals
+            else avg_frr
+        )
         summary.append(
             {
                 "model": model,
                 "avg_asr": f"{avg_asr:.4f}",
+                "avg_asr_effective": f"{avg_asr_effective:.4f}",
                 "avg_frr": f"{avg_frr:.4f}" if avg_frr is not None else "",
+                "avg_frr_effective": f"{avg_frr_effective:.4f}" if avg_frr_effective is not None else "",
                 "attacks": str(len(vals)),
             }
         )
@@ -313,14 +410,17 @@ def build_matrix(
     return models, attacks, matrix
 
 
-def compute_attack_summary(rows: List[Dict[str, str]]) -> List[Tuple[str, float]]:
+def compute_attack_summary(
+    rows: List[Dict[str, str]],
+    metric_key: str = "avg_asr",
+) -> List[Tuple[str, float]]:
     attack_vals: Dict[str, List[float]] = {}
     for row in rows:
         try:
-            asr_val = float(row["avg_asr"])
+            metric_val = float(row[metric_key])
         except (TypeError, ValueError):
             continue
-        attack_vals.setdefault(row["attack"], []).append(asr_val)
+        attack_vals.setdefault(row["attack"], []).append(metric_val)
     summary = []
     for attack, vals in attack_vals.items():
         if vals:
@@ -331,10 +431,15 @@ def compute_attack_summary(rows: List[Dict[str, str]]) -> List[Tuple[str, float]
 def generate_plots(
     rows: List[Dict[str, str]],
     heatmap_path: str,
+    effective_heatmap_path: str,
     frr_heatmap_path: str,
+    frr_effective_heatmap_path: str,
     model_bar_path: str,
+    model_bar_effective_path: str,
     attack_bar_path: str,
+    attack_bar_effective_path: str,
     frr_model_bar_path: str,
+    frr_model_bar_effective_path: str,
 ) -> List[str]:
     try:
         import matplotlib.pyplot as plt
@@ -420,6 +525,45 @@ def generate_plots(
         plt.close(fig)
         return output_path
 
+    def render_ranked_bar(
+        values: List[Tuple[str, float]],
+        *,
+        title: str,
+        ylabel: str,
+        cmap_name: str,
+        output_path: str,
+        descending: bool,
+    ) -> Optional[str]:
+        if not values:
+            return None
+        ordered = sorted(values, key=lambda item: item[1], reverse=descending)
+        labels = [item[0] for item in ordered]
+        y_vals = [item[1] for item in ordered]
+        fig_w = max(8.0, len(labels) * 1.0)
+        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
+        setup_axis(ax, title, ylabel)
+        x = np.arange(len(labels))
+        colors = plt.get_cmap(cmap_name)(np.linspace(0.3, 0.8, len(y_vals)))
+        bars = ax.bar(x, y_vals, color=colors, alpha=0.9, width=0.6)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height + (0.01 if height >= 0 else -0.01),
+                f"{height:.2f}",
+                ha="center",
+                va="bottom" if height >= 0 else "top",
+                fontsize=9,
+                color="#555555",
+            )
+        fig.tight_layout()
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        return output_path
+
     asr_models, asr_attacks, asr_matrix = build_matrix(rows, metric_key="avg_asr")
     asr_heatmap = render_heatmap(
         asr_models,
@@ -432,113 +576,248 @@ def generate_plots(
     if asr_heatmap:
         created.append(asr_heatmap)
 
+    asr_effective_models, asr_effective_attacks, asr_effective_matrix = build_matrix(
+        rows,
+        metric_key="avg_asr_effective",
+    )
+    asr_effective_heatmap = render_heatmap(
+        asr_effective_models,
+        asr_effective_attacks,
+        asr_effective_matrix,
+        title="Model ASR_effective by Attack Matrix",
+        cbar_label="Avg ASR_effective",
+        output_path=effective_heatmap_path,
+    )
+    if asr_effective_heatmap:
+        created.append(asr_effective_heatmap)
+
     frr_models, frr_attacks, frr_matrix = build_matrix(rows, metric_key="avg_frr")
     frr_heatmap = render_heatmap(
         frr_models,
         frr_attacks,
         frr_matrix,
-        title="Model FRR by Attack Matrix",
-        cbar_label="Avg FRR",
+        title="Model FRR_strict by Attack Matrix",
+        cbar_label="Avg FRR_strict",
         output_path=frr_heatmap_path,
     )
     if frr_heatmap:
         created.append(frr_heatmap)
 
+    frr_effective_models, frr_effective_attacks, frr_effective_matrix = build_matrix(
+        rows,
+        metric_key="avg_frr_effective",
+    )
+    frr_effective_heatmap = render_heatmap(
+        frr_effective_models,
+        frr_effective_attacks,
+        frr_effective_matrix,
+        title="Model FRR_effective by Attack Matrix",
+        cbar_label="Avg FRR_effective",
+        output_path=frr_effective_heatmap_path,
+    )
+    if frr_effective_heatmap:
+        created.append(frr_effective_heatmap)
+
     model_summary = format_model_summary(rows)
-    model_vals = []
+    model_vals_strict: List[Tuple[str, float]] = []
+    model_vals_effective: List[Tuple[str, float]] = []
+    frr_model_vals_strict: List[Tuple[str, float]] = []
+    frr_model_vals_effective: List[Tuple[str, float]] = []
     for row in model_summary:
-        try:
-            model_vals.append((row["model"], float(row["avg_asr"])))
-        except (TypeError, ValueError):
+        model = row.get("model")
+        if not model:
             continue
-    model_vals.sort(key=lambda item: item[1])
+        try:
+            model_vals_strict.append((model, float(row["avg_asr"])))
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            model_vals_effective.append((model, float(row["avg_asr_effective"])))
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            frr_model_vals_strict.append((model, float(row["avg_frr"])))
+        except (TypeError, ValueError, KeyError):
+            pass
+        try:
+            frr_model_vals_effective.append((model, float(row["avg_frr_effective"])))
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    model_bar = render_ranked_bar(
+        model_vals_strict,
+        title="Model Average ASR_strict (Ascending)",
+        ylabel="Avg ASR_strict",
+        cmap_name="viridis",
+        output_path=model_bar_path,
+        descending=False,
+    )
+    if model_bar:
+        created.append(model_bar)
+    model_bar_effective = render_ranked_bar(
+        model_vals_effective,
+        title="Model Average ASR_effective (Ascending)",
+        ylabel="Avg ASR_effective",
+        cmap_name="plasma",
+        output_path=model_bar_effective_path,
+        descending=False,
+    )
+    if model_bar_effective:
+        created.append(model_bar_effective)
+
+    frr_model_bar = render_ranked_bar(
+        frr_model_vals_strict,
+        title="Model Average FRR_strict (Ascending)",
+        ylabel="Avg FRR_strict",
+        cmap_name="cividis",
+        output_path=frr_model_bar_path,
+        descending=False,
+    )
+    if frr_model_bar:
+        created.append(frr_model_bar)
+    frr_model_bar_effective = render_ranked_bar(
+        frr_model_vals_effective,
+        title="Model Average FRR_effective (Ascending)",
+        ylabel="Avg FRR_effective",
+        cmap_name="inferno",
+        output_path=frr_model_bar_effective_path,
+        descending=False,
+    )
+    if frr_model_bar_effective:
+        created.append(frr_model_bar_effective)
+
+    attack_summary = compute_attack_summary(rows, metric_key="avg_asr")
+    attack_bar = render_ranked_bar(
+        attack_summary,
+        title="Attack Effectiveness (Avg ASR_strict Descending)",
+        ylabel="Avg ASR_strict",
+        cmap_name="magma",
+        output_path=attack_bar_path,
+        descending=True,
+    )
+    if attack_bar:
+        created.append(attack_bar)
+    attack_effective_summary = compute_attack_summary(rows, metric_key="avg_asr_effective")
+    attack_bar_effective = render_ranked_bar(
+        attack_effective_summary,
+        title="Attack Effectiveness (Avg ASR_effective Descending)",
+        ylabel="Avg ASR_effective",
+        cmap_name="cubehelix",
+        output_path=attack_bar_effective_path,
+        descending=True,
+    )
+    if attack_bar_effective:
+        created.append(attack_bar_effective)
+
+    return created
+
+
+def generate_legacy_asr_plots(
+    rows: List[Dict[str, str]],
+    heatmap_path: str,
+    model_bar_path: str,
+    attack_bar_path: str,
+) -> List[str]:
+    if not rows:
+        return []
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "sans-serif",
+        ]
+    except ImportError:
+        print("matplotlib not available; skipping legacy ASR plots.")
+        return []
+
+    created: List[str] = []
+
+    models, attacks, matrix = build_matrix(rows, metric_key="avg_asr")
+    if models and attacks:
+        data = np.array(matrix, dtype=float)
+        if np.isfinite(data).any():
+            fig_w = max(8.0, len(attacks) * 1.2)
+            fig_h = max(6.0, len(models) * 0.8)
+            fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+            vmax = float(np.nanmax(data)) if np.isfinite(np.nanmax(data)) else 1.0
+            if vmax <= 0.0:
+                vmax = 1.0
+            im = ax.imshow(data, aspect="auto", cmap="RdYlBu_r", vmin=0.0, vmax=vmax)
+            ax.set_xticks(np.arange(len(attacks) + 1) - 0.5, minor=True)
+            ax.set_yticks(np.arange(len(models) + 1) - 0.5, minor=True)
+            ax.grid(which="minor", color="w", linestyle="-", linewidth=3)
+            ax.tick_params(which="minor", bottom=False, left=False)
+            ax.set_xticks(range(len(attacks)))
+            ax.set_xticklabels(attacks, rotation=45, ha="right", fontsize=10)
+            ax.set_yticks(range(len(models)))
+            ax.set_yticklabels(models, fontsize=10)
+            for i in range(len(models)):
+                for j in range(len(attacks)):
+                    val = data[i, j]
+                    if np.isnan(val):
+                        continue
+                    text_color = "white" if (val < 0.3 or val > 0.7) else "black"
+                    ax.text(
+                        j,
+                        i,
+                        f"{val:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=9,
+                        color=text_color,
+                        fontweight="bold",
+                    )
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar.ax.set_ylabel("Avg ASR_legacy", rotation=-90, va="bottom", fontsize=10)
+            cbar.outline.set_visible(False)
+            ax.set_title("Model ASR_legacy by Attack Matrix", fontsize=14, fontweight="bold", pad=20)
+            fig.tight_layout()
+            os.makedirs(os.path.dirname(heatmap_path), exist_ok=True)
+            fig.savefig(heatmap_path, dpi=300, bbox_inches="tight")
+            plt.close(fig)
+            created.append(heatmap_path)
+
+    model_summary = format_model_summary(rows)
+    model_vals: List[Tuple[str, float]] = []
+    for row in model_summary:
+        model = row.get("model")
+        if not model:
+            continue
+        try:
+            model_vals.append((model, float(row["avg_asr"])))
+        except (TypeError, ValueError, KeyError):
+            continue
     if model_vals:
-        labels = [item[0] for item in model_vals]
-        values = [item[1] for item in model_vals]
-        fig_w = max(8.0, len(labels) * 1.0)
-        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
-        setup_axis(ax, "Model Average ASR (Ascending)", "Avg ASR")
-        colors = plt.cm.viridis(np.linspace(0.3, 0.8, len(values)))
-        bars = ax.bar(labels, values, color=colors, alpha=0.9, width=0.6)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height + 0.01,
-                f"{height:.2f}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color="#555555",
+        labels = [item[0] for item in sorted(model_vals, key=lambda item: item[1])]
+        values = [item[1] for item in sorted(model_vals, key=lambda item: item[1])]
+        created.extend(
+            generate_single_metric_bar(
+                labels=labels,
+                values=values,
+                title="Model Average ASR_legacy (Ascending)",
+                cmap_name="Purples",
+                output_path=model_bar_path,
             )
-        fig.tight_layout()
-        os.makedirs(os.path.dirname(model_bar_path), exist_ok=True)
-        fig.savefig(model_bar_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        created.append(model_bar_path)
+        )
 
-    frr_model_vals = []
-    for row in model_summary:
-        try:
-            frr_model_vals.append((row["model"], float(row["avg_frr"])))
-        except (TypeError, ValueError):
-            continue
-    frr_model_vals.sort(key=lambda item: item[1])
-    if frr_model_vals:
-        labels = [item[0] for item in frr_model_vals]
-        values = [item[1] for item in frr_model_vals]
-        fig_w = max(8.0, len(labels) * 1.0)
-        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
-        setup_axis(ax, "Model Average FRR (Ascending)", "Avg FRR")
-        colors = plt.cm.cividis(np.linspace(0.3, 0.8, len(values)))
-        bars = ax.bar(labels, values, color=colors, alpha=0.9, width=0.6)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height + 0.01,
-                f"{height:.2f}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color="#555555",
-            )
-        fig.tight_layout()
-        os.makedirs(os.path.dirname(frr_model_bar_path), exist_ok=True)
-        fig.savefig(frr_model_bar_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        created.append(frr_model_bar_path)
-
-    attack_summary = compute_attack_summary(rows)
-    attack_summary.sort(key=lambda item: item[1], reverse=True)
+    attack_summary = compute_attack_summary(rows, metric_key="avg_asr")
     if attack_summary:
-        labels = [item[0] for item in attack_summary]
-        values = [item[1] for item in attack_summary]
-        fig_w = max(8.0, len(labels) * 1.0)
-        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
-        setup_axis(ax, "Attack Effectiveness (Avg ASR Descending)", "Avg ASR")
-        colors = plt.cm.magma(np.linspace(0.3, 0.8, len(values)))
-        bars = ax.bar(labels, values, color=colors, alpha=0.9, width=0.6)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=10)
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                height + 0.01,
-                f"{height:.2f}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color="#555555",
+        ordered = sorted(attack_summary, key=lambda item: item[1], reverse=True)
+        labels = [item[0] for item in ordered]
+        values = [item[1] for item in ordered]
+        created.extend(
+            generate_single_metric_bar(
+                labels=labels,
+                values=values,
+                title="Attack Effectiveness (Avg ASR_legacy)",
+                cmap_name="PuRd",
+                output_path=attack_bar_path,
             )
-        fig.tight_layout()
-        os.makedirs(os.path.dirname(attack_bar_path), exist_ok=True)
-        fig.savefig(attack_bar_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        created.append(attack_bar_path)
-
+        )
     return created
 
 
@@ -894,6 +1173,10 @@ def generate_tiered_dashboard(
     metric_summary: List[Dict[str, str]],
     mds_rows: List[Dict[str, str]],
     output_path: str,
+    *,
+    asr_key: str = "avg_asr",
+    frr_key: str = "avg_frr",
+    title_suffix: str = "strict",
 ) -> List[str]:
     try:
         import matplotlib.pyplot as plt
@@ -916,8 +1199,8 @@ def generate_tiered_dashboard(
         if not model:
             continue
         try:
-            asr_by_model[model] = float(row["avg_asr"])
-            frr_by_model[model] = float(row["avg_frr"])
+            asr_by_model[model] = float(row[asr_key])
+            frr_by_model[model] = float(row[frr_key])
         except (TypeError, ValueError, KeyError):
             continue
 
@@ -977,10 +1260,10 @@ def generate_tiered_dashboard(
         ax.set_ylim(0.0, 1.0)
         ax.axvline(np.median(x_vals), color="#888888", linestyle="--", linewidth=0.8)
         ax.axhline(np.median(y_vals), color="#888888", linestyle="--", linewidth=0.8)
-        ax.set_xlabel("FRR (lower is better)")
-        ax.set_ylabel("ASR (lower is better)")
+        ax.set_xlabel(f"{frr_key} (lower is better)")
+        ax.set_ylabel(f"{asr_key} (lower is better)")
     else:
-        ax.text(0.5, 0.5, "No ASR/FRR data", ha="center", va="center", color="#777777")
+        ax.text(0.5, 0.5, f"No {asr_key}/{frr_key} data", ha="center", va="center", color="#777777")
     ax.set_title("Safety-Utility Quadrant", fontsize=11, fontweight="bold", loc="left")
 
     # Panel 2: Business Risk (WSL + CM)
@@ -1036,7 +1319,7 @@ def generate_tiered_dashboard(
         ax.text(0.5, 0.5, "No stability data", ha="center", va="center", color="#777777")
     ax.set_title("Stability Snapshot", fontsize=11, fontweight="bold", loc="left")
 
-    fig.suptitle("Tiered Safety Dashboard", fontsize=14, fontweight="bold", y=0.98)
+    fig.suptitle(f"Tiered Safety Dashboard ({title_suffix})", fontsize=14, fontweight="bold", y=0.98)
     fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.96])
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -1050,6 +1333,10 @@ def generate_exec_summary(
     metric_summary: List[Dict[str, str]],
     mds_rows: List[Dict[str, str]],
     output_path: str,
+    *,
+    asr_key: str = "avg_asr",
+    frr_key: str = "avg_frr",
+    title_suffix: str = "strict",
 ) -> List[str]:
     try:
         import matplotlib.pyplot as plt
@@ -1072,8 +1359,8 @@ def generate_exec_summary(
         if not model:
             continue
         try:
-            asr_by_model[model] = float(row["avg_asr"])
-            frr_by_model[model] = float(row["avg_frr"])
+            asr_by_model[model] = float(row[asr_key])
+            frr_by_model[model] = float(row[frr_key])
         except (TypeError, ValueError, KeyError):
             continue
 
@@ -1166,7 +1453,12 @@ def generate_exec_summary(
     ax.invert_yaxis()
     ax.set_xlim(0.0, 1.0)
     ax.set_xlabel("Score (1 = best)")
-    ax.set_title("Simple Score (1 - (ASR+FRR)/2)", fontsize=11, fontweight="bold", loc="left")
+    ax.set_title(
+        f"Simple Score ({title_suffix}, 1 - ({asr_key}+{frr_key})/2)",
+        fontsize=11,
+        fontweight="bold",
+        loc="left",
+    )
     ax.tick_params(axis="y", labelsize=8)
 
     ax = axes[1]
@@ -1176,12 +1468,17 @@ def generate_exec_summary(
         ax.invert_yaxis()
         ax.set_xlim(0.0, 1.0)
         ax.set_xlabel("Score (weighted)")
-        ax.set_title("Weighted Score (ASR/FRR/MDS/WSL/CM)", fontsize=11, fontweight="bold", loc="left")
+        ax.set_title(
+            f"Weighted Score ({title_suffix}, ASR/FRR/MDS/WSL/CM)",
+            fontsize=11,
+            fontweight="bold",
+            loc="left",
+        )
         ax.tick_params(axis="y", labelsize=8)
         ax.text(
             0.0,
             -0.12,
-            "Weights: ASR 0.40, FRR 0.25, MDS 0.20, WSL 0.10, CM 0.05",
+            f"Weights: {asr_key} 0.40, {frr_key} 0.25, MDS 0.20, WSL 0.10, CM 0.05",
             transform=ax.transAxes,
             fontsize=8,
             color="#555555",
@@ -1190,7 +1487,7 @@ def generate_exec_summary(
         ax.text(0.5, 0.5, "No full-metric data", ha="center", va="center", color="#777777")
         ax.set_axis_off()
 
-    fig.suptitle("Executive Summary Overview", fontsize=14, fontweight="bold", y=0.98)
+    fig.suptitle(f"Executive Summary Overview ({title_suffix})", fontsize=14, fontweight="bold", y=0.98)
     fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.95])
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -1202,8 +1499,11 @@ def generate_exec_summary(
 def write_markdown(
     output_path: str,
     model_summary: List[Dict[str, str]],
+    legacy_model_summary: List[Dict[str, str]],
     attack_list: List[str],
     matrix_rows: List[Dict[str, str]],
+    legacy_attack_list: List[str],
+    legacy_matrix_rows: List[Dict[str, str]],
     mds_rows: List[Dict[str, str]],
     metric_summary: List[Dict[str, str]],
     kappa_summary: Optional[Dict[str, str]],
@@ -1226,7 +1526,7 @@ def write_markdown(
         lines.extend(
             [
                 "",
-                "## Model ASR by Attack",
+                "## Model ASR_strict by Attack",
                 "",
                 "| Model | " + " | ".join(attack_list) + " |",
                 "| --- | " + " | ".join(["---"] * len(attack_list)) + " |",
@@ -1242,14 +1542,28 @@ def write_markdown(
         )
         if heatmap_path:
             rel_heatmap = os.path.relpath(heatmap_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Model ASR by Attack Heatmap]({rel_heatmap})"])
+            lines.extend(["", f"![Model ASR_strict by Attack Heatmap]({rel_heatmap})"])
+        asr_effective_heatmap_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_EFFECTIVE_HEATMAP)),
+            None,
+        )
+        if asr_effective_heatmap_path:
+            rel_asr_effective_heatmap = os.path.relpath(asr_effective_heatmap_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model ASR_effective by Attack Heatmap]({rel_asr_effective_heatmap})"])
         frr_heatmap_path = next(
             (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_FRR_HEATMAP)),
             None,
         )
         if frr_heatmap_path:
             rel_frr_heatmap = os.path.relpath(frr_heatmap_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Model FRR by Attack Heatmap]({rel_frr_heatmap})"])
+            lines.extend(["", f"![Model FRR_strict by Attack Heatmap]({rel_frr_heatmap})"])
+        frr_effective_heatmap_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_FRR_EFFECTIVE_HEATMAP)),
+            None,
+        )
+        if frr_effective_heatmap_path:
+            rel_frr_effective_heatmap = os.path.relpath(frr_effective_heatmap_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model FRR_effective by Attack Heatmap]({rel_frr_effective_heatmap})"])
 
     if model_summary:
         lines.extend(
@@ -1257,13 +1571,13 @@ def write_markdown(
                 "",
                 "## Model Summary (Average ASR/FRR across attacks)",
                 "",
-                "| Model | Avg ASR | Avg FRR | Attacks Covered |",
-                "| --- | --- | --- | --- |",
+                "| Model | Avg ASR_strict | Avg ASR_effective | Avg FRR_strict | Avg FRR_effective | Attacks Covered |",
+                "| --- | --- | --- | --- | --- | --- |",
             ]
         )
         for row in model_summary:
             lines.append(
-                "| {model} | {avg_asr} | {avg_frr} | {attacks} |".format(
+                "| {model} | {avg_asr} | {avg_asr_effective} | {avg_frr} | {avg_frr_effective} | {attacks} |".format(
                     **row
                 )
             )
@@ -1274,7 +1588,14 @@ def write_markdown(
         )
         if model_bar_path:
             rel_model_bar = os.path.relpath(model_bar_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Model Average ASR Bar]({rel_model_bar})"])
+            lines.extend(["", f"![Model Average ASR_strict Bar]({rel_model_bar})"])
+        model_bar_effective_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_MODEL_BAR_EFFECTIVE)),
+            None,
+        )
+        if model_bar_effective_path:
+            rel_model_bar_effective = os.path.relpath(model_bar_effective_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Average ASR_effective Bar]({rel_model_bar_effective})"])
 
         frr_model_bar_path = next(
             (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_FRR_MODEL_BAR)),
@@ -1282,7 +1603,14 @@ def write_markdown(
         )
         if frr_model_bar_path:
             rel_frr_bar = os.path.relpath(frr_model_bar_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Model Average FRR Bar]({rel_frr_bar})"])
+            lines.extend(["", f"![Model Average FRR_strict Bar]({rel_frr_bar})"])
+        frr_model_bar_effective_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_FRR_MODEL_BAR_EFFECTIVE)),
+            None,
+        )
+        if frr_model_bar_effective_path:
+            rel_frr_bar_effective = os.path.relpath(frr_model_bar_effective_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Average FRR_effective Bar]({rel_frr_bar_effective})"])
 
         attack_bar_path = next(
             (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_ATTACK_BAR)),
@@ -1290,7 +1618,66 @@ def write_markdown(
         )
         if attack_bar_path:
             rel_attack_bar = os.path.relpath(attack_bar_path, os.path.dirname(output_path))
-            lines.extend(["", f"![Attack Average ASR Bar]({rel_attack_bar})"])
+            lines.extend(["", f"![Attack Average ASR_strict Bar]({rel_attack_bar})"])
+        attack_bar_effective_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_ATTACK_BAR_EFFECTIVE)),
+            None,
+        )
+        if attack_bar_effective_path:
+            rel_attack_bar_effective = os.path.relpath(attack_bar_effective_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Attack Average ASR_effective Bar]({rel_attack_bar_effective})"])
+
+    if legacy_model_summary:
+        lines.extend(
+            [
+                "",
+                "## Legacy Mode (GPT5Scorer, legacy_safe)",
+                "",
+                "| Model | Avg ASR_legacy | Attacks Covered |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for row in legacy_model_summary:
+            lines.append(
+                "| {model} | {avg_asr} | {attacks} |".format(
+                    model=row.get("model", ""),
+                    avg_asr=row.get("avg_asr", ""),
+                    attacks=row.get("attacks", ""),
+                )
+            )
+        legacy_heatmap_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_LEGACY_HEATMAP)),
+            None,
+        )
+        if legacy_heatmap_path:
+            rel_legacy_heatmap = os.path.relpath(legacy_heatmap_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model ASR_legacy by Attack Heatmap]({rel_legacy_heatmap})"])
+        legacy_model_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_LEGACY_MODEL_BAR)),
+            None,
+        )
+        if legacy_model_bar_path:
+            rel_legacy_model_bar = os.path.relpath(legacy_model_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Model Average ASR_legacy Bar]({rel_legacy_model_bar})"])
+        legacy_attack_bar_path = next(
+            (p for p in plot_paths if os.path.basename(p) == os.path.basename(DEFAULT_LEGACY_ATTACK_BAR)),
+            None,
+        )
+        if legacy_attack_bar_path:
+            rel_legacy_attack_bar = os.path.relpath(legacy_attack_bar_path, os.path.dirname(output_path))
+            lines.extend(["", f"![Attack Average ASR_legacy Bar]({rel_legacy_attack_bar})"])
+
+        if legacy_attack_list and legacy_matrix_rows:
+            lines.extend(
+                [
+                    "",
+                    "| Model | " + " | ".join(legacy_attack_list) + " |",
+                    "| --- | " + " | ".join(["---"] * len(legacy_attack_list)) + " |",
+                ]
+            )
+            for row in legacy_matrix_rows:
+                values = [row.get(attack, "") for attack in legacy_attack_list]
+                lines.append("| {model} | ".format(model=row["model"]) + " | ".join(values) + " |")
 
     if exec_summary_paths:
         lines.extend(
@@ -1298,12 +1685,24 @@ def write_markdown(
                 "",
                 "## Executive Summary Overview",
                 "",
-                "Left: simple score (1 - (ASR+FRR)/2). Right: weighted score.",
+                "Left: simple score. Right: weighted score.",
                 "",
             ]
         )
-        rel_exec = os.path.relpath(exec_summary_paths[0], os.path.dirname(output_path))
-        lines.append(f"![Executive Summary]({rel_exec})")
+        exec_strict = next(
+            (p for p in exec_summary_paths if os.path.basename(p) == os.path.basename(DEFAULT_EXEC_SUMMARY)),
+            None,
+        )
+        if exec_strict:
+            rel_exec = os.path.relpath(exec_strict, os.path.dirname(output_path))
+            lines.append(f"![Executive Summary (strict)]({rel_exec})")
+        exec_effective = next(
+            (p for p in exec_summary_paths if os.path.basename(p) == os.path.basename(DEFAULT_EXEC_SUMMARY_EFFECTIVE)),
+            None,
+        )
+        if exec_effective:
+            rel_exec_effective = os.path.relpath(exec_effective, os.path.dirname(output_path))
+            lines.append(f"![Executive Summary (effective)]({rel_exec_effective})")
 
     if tiered_paths:
         lines.extend(
@@ -1315,8 +1714,20 @@ def write_markdown(
                 "",
             ]
         )
-        rel_tiered = os.path.relpath(tiered_paths[0], os.path.dirname(output_path))
-        lines.append(f"![Tiered Dashboard]({rel_tiered})")
+        tiered_strict = next(
+            (p for p in tiered_paths if os.path.basename(p) == os.path.basename(DEFAULT_TIERED_DASHBOARD)),
+            None,
+        )
+        if tiered_strict:
+            rel_tiered = os.path.relpath(tiered_strict, os.path.dirname(output_path))
+            lines.append(f"![Tiered Dashboard (strict)]({rel_tiered})")
+        tiered_effective = next(
+            (p for p in tiered_paths if os.path.basename(p) == os.path.basename(DEFAULT_TIERED_DASHBOARD_EFFECTIVE)),
+            None,
+        )
+        if tiered_effective:
+            rel_tiered_effective = os.path.relpath(tiered_effective, os.path.dirname(output_path))
+            lines.append(f"![Tiered Dashboard (effective)]({rel_tiered_effective})")
 
     if mds_rows:
         lines.extend(
@@ -1556,25 +1967,75 @@ def main() -> None:
     parser.add_argument("--cm-dir", default=DEFAULT_CM_DIR, help="Directory with CM reports")
     parser.add_argument("--kappa-csv", default=DEFAULT_KAPPA_CSV, help="Kappa report CSV path")
     parser.add_argument("--heatmap", default=DEFAULT_HEATMAP, help="Heatmap image path")
+    parser.add_argument(
+        "--effective-heatmap",
+        default=DEFAULT_EFFECTIVE_HEATMAP,
+        help="ASR_effective heatmap image path",
+    )
+    parser.add_argument(
+        "--legacy-heatmap",
+        default=DEFAULT_LEGACY_HEATMAP,
+        help="Legacy-mode ASR heatmap image path",
+    )
     parser.add_argument("--frr-heatmap", default=DEFAULT_FRR_HEATMAP, help="FRR heatmap image path")
+    parser.add_argument(
+        "--frr-effective-heatmap",
+        default=DEFAULT_FRR_EFFECTIVE_HEATMAP,
+        help="FRR_effective heatmap image path",
+    )
     parser.add_argument("--model-bar", default=DEFAULT_MODEL_BAR, help="Model bar chart path")
+    parser.add_argument(
+        "--model-bar-effective",
+        default=DEFAULT_MODEL_BAR_EFFECTIVE,
+        help="Model ASR_effective bar chart path",
+    )
+    parser.add_argument(
+        "--legacy-model-bar",
+        default=DEFAULT_LEGACY_MODEL_BAR,
+        help="Legacy-mode model ASR bar chart path",
+    )
     parser.add_argument("--attack-bar", default=DEFAULT_ATTACK_BAR, help="Attack bar chart path")
+    parser.add_argument(
+        "--attack-bar-effective",
+        default=DEFAULT_ATTACK_BAR_EFFECTIVE,
+        help="Attack ASR_effective bar chart path",
+    )
+    parser.add_argument(
+        "--legacy-attack-bar",
+        default=DEFAULT_LEGACY_ATTACK_BAR,
+        help="Legacy-mode attack ASR bar chart path",
+    )
     parser.add_argument("--bias-bar", default=DEFAULT_BIAS_BAR, help="Bias bar chart path")
     parser.add_argument("--wsl-bar", default=DEFAULT_WSL_BAR, help="WSL bar chart path")
     parser.add_argument("--cm-bar", default=DEFAULT_CM_BAR, help="CM bar chart path")
     parser.add_argument("--mds-bar", default=DEFAULT_MDS_BAR, help="MDS bar chart path")
     parser.add_argument("--frr-bar", default=DEFAULT_FRR_MODEL_BAR, help="FRR model bar chart path")
+    parser.add_argument(
+        "--frr-bar-effective",
+        default=DEFAULT_FRR_MODEL_BAR_EFFECTIVE,
+        help="FRR_effective model bar chart path",
+    )
     parser.add_argument("--frr-dir", default=DEFAULT_FRR_DIR, help="Directory with FRR reports")
     parser.add_argument("--radar-dir", default=DEFAULT_RADAR_DIR, help="Radar chart output directory")
     parser.add_argument(
         "--tiered-dashboard",
         default=DEFAULT_TIERED_DASHBOARD,
-        help="Tiered dashboard image path",
+        help="Tiered dashboard image path (strict)",
+    )
+    parser.add_argument(
+        "--tiered-dashboard-effective",
+        default=DEFAULT_TIERED_DASHBOARD_EFFECTIVE,
+        help="Tiered dashboard image path (effective)",
     )
     parser.add_argument(
         "--exec-summary",
         default=DEFAULT_EXEC_SUMMARY,
-        help="Executive summary overview image path",
+        help="Executive summary overview image path (strict)",
+    )
+    parser.add_argument(
+        "--exec-summary-effective",
+        default=DEFAULT_EXEC_SUMMARY_EFFECTIVE,
+        help="Executive summary overview image path (effective)",
     )
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     args = parser.parse_args()
@@ -1584,13 +2045,16 @@ def main() -> None:
         raise SystemExit(f"summary_long.csv not found: {input_path}")
 
     frr_by_run = read_frr_reports(os.path.abspath(args.frr_dir))
-    groups, unparsed = read_summary_long(input_path, frr_by_run)
+    groups, legacy_groups, unparsed = read_summary_long(input_path, frr_by_run)
     rows = format_group_rows(groups)
+    legacy_rows = format_group_rows(legacy_groups)
     if not rows:
         raise SystemExit("No valid rows found in summary_long.csv")
 
     model_summary = format_model_summary(rows)
     attack_list, matrix_rows = format_model_attack_matrix(rows)
+    legacy_model_summary = format_model_summary(legacy_rows) if legacy_rows else []
+    legacy_attack_list, legacy_matrix_rows = format_model_attack_matrix(legacy_rows) if legacy_rows else ([], [])
     mds_dir = os.path.abspath(args.mds_dir)
     mds_rows = read_mds_reports(mds_dir)
     bias_vals = read_metric_reports(
@@ -1615,11 +2079,25 @@ def main() -> None:
         plot_paths = generate_plots(
             rows,
             os.path.abspath(args.heatmap),
+            os.path.abspath(args.effective_heatmap),
             os.path.abspath(args.frr_heatmap),
+            os.path.abspath(args.frr_effective_heatmap),
             os.path.abspath(args.model_bar),
+            os.path.abspath(args.model_bar_effective),
             os.path.abspath(args.attack_bar),
+            os.path.abspath(args.attack_bar_effective),
             os.path.abspath(args.frr_bar),
+            os.path.abspath(args.frr_bar_effective),
         )
+        if legacy_rows:
+            plot_paths.extend(
+                generate_legacy_asr_plots(
+                    legacy_rows,
+                    os.path.abspath(args.legacy_heatmap),
+                    os.path.abspath(args.legacy_model_bar),
+                    os.path.abspath(args.legacy_attack_bar),
+                )
+            )
         plot_paths.extend(
             generate_metric_charts_from_summary(
                 metric_summary,
@@ -1639,18 +2117,49 @@ def main() -> None:
             metric_summary,
             mds_rows,
             os.path.abspath(args.tiered_dashboard),
+            asr_key="avg_asr",
+            frr_key="avg_frr",
+            title_suffix="strict",
+        )
+        tiered_paths.extend(
+            generate_tiered_dashboard(
+                model_summary,
+                metric_summary,
+                mds_rows,
+                os.path.abspath(args.tiered_dashboard_effective),
+                asr_key="avg_asr_effective",
+                frr_key="avg_frr_effective",
+                title_suffix="effective",
+            )
         )
         exec_summary_paths = generate_exec_summary(
             model_summary,
             metric_summary,
             mds_rows,
             os.path.abspath(args.exec_summary),
+            asr_key="avg_asr",
+            frr_key="avg_frr",
+            title_suffix="strict",
+        )
+        exec_summary_paths.extend(
+            generate_exec_summary(
+                model_summary,
+                metric_summary,
+                mds_rows,
+                os.path.abspath(args.exec_summary_effective),
+                asr_key="avg_asr_effective",
+                frr_key="avg_frr_effective",
+                title_suffix="effective",
+            )
         )
     write_markdown(
         args.output,
         model_summary,
+        legacy_model_summary,
         attack_list,
         matrix_rows,
+        legacy_attack_list,
+        legacy_matrix_rows,
         mds_rows,
         metric_summary,
         kappa_summary,

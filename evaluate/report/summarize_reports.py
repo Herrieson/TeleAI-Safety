@@ -18,6 +18,25 @@ WIDE_CSV = os.path.join(REPORT_DIR, "summary_wide.csv")
 MARKDOWN = os.path.join(REPORT_DIR, "summary.md")
 
 
+def is_legacy_result(scorer: str, report_path: str, input_file: str) -> bool:
+    scorer_lower = (scorer or "").lower()
+    if "legacy" in scorer_lower:
+        return True
+    report_base = os.path.basename(report_path).lower()
+    input_base = os.path.basename(input_file).lower()
+    return "_legacy_" in report_base or "_legacy" in input_base
+
+
+def normalize_scorer_name(scorer: str, report_path: str, input_file: str) -> str:
+    if is_legacy_result(scorer, report_path, input_file):
+        return f"{scorer}Legacy"
+    return scorer
+
+
+def is_legacy_scorer_name(scorer: str) -> bool:
+    return "legacy" in (scorer or "").lower()
+
+
 def parse_report(path: str) -> Optional[Dict[str, str]]:
     """Parse a single eval_summary_report.txt file."""
     patterns = {
@@ -151,10 +170,11 @@ def collect_reports() -> List[Dict[str, str]]:
             if not parsed:
                 continue
             attack_run, attack_group = derive_attack_run(parsed["input_file"])
+            scorer_name = normalize_scorer_name(parsed["scorer"], path, parsed["input_file"])
             row = {
                 "attack_run": attack_run,
                 "attack_group": attack_group,
-                "scorer": parsed["scorer"],
+                "scorer": scorer_name,
                 "total_samples": parsed["total"],
                 "skipped_samples": parsed["skipped"],
                 "attack_success_samples": parsed["success"],
@@ -174,10 +194,16 @@ def collect_reports() -> List[Dict[str, str]]:
     return rows
 
 
-def compute_run_avg_metric(rows: List[Dict[str, str]], field: str) -> Dict[str, str]:
+def compute_run_avg_metric(
+    rows: List[Dict[str, str]],
+    field: str,
+    include_legacy: bool = False,
+) -> Dict[str, str]:
     """Compute average metric across different scorers for each attack run."""
     metric_by_run: Dict[str, List[float]] = defaultdict(list)
     for row in rows:
+        if not include_legacy and is_legacy_scorer_name(row.get("scorer", "")):
+            continue
         try:
             metric_val = float(row[field])
         except (ValueError, TypeError):
@@ -187,11 +213,11 @@ def compute_run_avg_metric(rows: List[Dict[str, str]], field: str) -> Dict[str, 
 
 
 def compute_run_avg_asr(rows: List[Dict[str, str]]) -> Dict[str, str]:
-    return compute_run_avg_metric(rows, "asr")
+    return compute_run_avg_metric(rows, "asr", include_legacy=False)
 
 
 def compute_run_avg_asr_effective(rows: List[Dict[str, str]]) -> Dict[str, str]:
-    return compute_run_avg_metric(rows, "asr_effective")
+    return compute_run_avg_metric(rows, "asr_effective", include_legacy=False)
 
 
 def write_long_csv(

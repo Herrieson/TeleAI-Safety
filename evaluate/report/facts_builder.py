@@ -20,7 +20,18 @@ DEFAULT_FRR_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr")
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "facts.json")
 DEFAULT_FACTS_MD = os.path.join(PROJECT_ROOT, "evaluation_report", "facts.md")
 
+DEFAULT_PLOTS_ROOT = os.path.join(PROJECT_ROOT, "evaluation_report", "plots")
 DEFAULT_PLOTS = {
+    "heatmap": os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "asr_strict_model_attack.png"),
+    "model_bar": os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_strict_model_avg.png"),
+    "attack_bar": os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_strict_attack_avg.png"),
+    "legacy_heatmap": os.path.join(DEFAULT_PLOTS_ROOT, "heatmap", "asr_legacy_model_attack.png"),
+    "legacy_model_bar": os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_legacy_model_avg.png"),
+    "legacy_attack_bar": os.path.join(DEFAULT_PLOTS_ROOT, "bar", "asr_legacy_attack_avg.png"),
+    "metric_bar": os.path.join(DEFAULT_PLOTS_ROOT, "bar", "summary_bar_metrics.png"),
+    "frr_bar": os.path.join(DEFAULT_PLOTS_ROOT, "bar", "frr_strict_model_avg.png"),
+}
+LEGACY_PLOTS = {
     "heatmap": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_heatmap.png"),
     "model_bar": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_models.png"),
     "attack_bar": os.path.join(PROJECT_ROOT, "evaluation_report", "summary_bar_attacks.png"),
@@ -48,6 +59,10 @@ FRR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr_labels")
 
 def normalize_attack_name(name: str) -> str:
     return name.replace("_", "")
+
+
+def is_legacy_scorer_name(scorer: str) -> bool:
+    return "legacy" in (scorer or "").lower()
 
 
 def split_attack_and_model(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -122,6 +137,9 @@ def read_summary_long(path: str) -> Tuple[List[Dict[str, str]], List[str]]:
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            scorer = (row.get("scorer") or "").strip()
+            if is_legacy_scorer_name(scorer):
+                continue
             attack_run = (row.get("attack_run") or "").strip()
             parsed = parse_attack_run(attack_run)
             if not parsed:
@@ -397,6 +415,10 @@ def collect_plots(paths: Dict[str, str]) -> Dict[str, str]:
     for key, path in paths.items():
         if os.path.isfile(path):
             plots[key] = os.path.relpath(path, PROJECT_ROOT)
+            continue
+        legacy_path = LEGACY_PLOTS.get(key)
+        if legacy_path and os.path.isfile(legacy_path):
+            plots[key] = os.path.relpath(legacy_path, PROJECT_ROOT)
     return plots
 
 

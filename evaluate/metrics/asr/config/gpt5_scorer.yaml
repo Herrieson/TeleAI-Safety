@@ -1,11 +1,11 @@
 role: None
 debate: false
-model: gpt-4o
+model: gpt-5
 # api_key_env: OPENAI_API_KEY
 # 可选：自定义接口地址（如代理），默认留空
 # api_base: https://api.openai.com/v1
 
 # 如使用 Azure OpenAI，可设置：
 api_key_env: AZURE_OPENAI_API_KEY
-azure_endpoint_env: AZURE_OPENAI_ENDPOINT  # 环境变量名，值如 https://<your-resource>.openai.azure.com
+azure_endpoint_env: AZURE_OPENAI_ENDPOINT # 环境变量名，值如 https://<your-resource>.openai.azure.com
 azure_api_version: AZURE_OPENAI_API_VERSION
