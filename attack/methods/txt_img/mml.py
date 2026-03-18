@@ -16,7 +16,6 @@ from utils.message_builder import build_messages, normalize_images
 from dataset import AttackDataset
 from models import load_model
 
-import openai
 from PIL import Image, ImageDraw, ImageFont
 
 # ==========================================
@@ -529,6 +528,7 @@ class AttackConfig:
     target_model_type: str = "openai"
     target_model_name: str = "gpt-4o"
     target_model_path: str = ""
+    target_system_prompt: Optional[str] = None
 
     eval_model_type: Optional[str] = "openai"
     eval_model_name: str = "gpt-4o-mini"
@@ -567,7 +567,7 @@ class MMLManager(BaseAttackManager):
         return cls(config)
 
     def __init__(self, config: AttackConfig, delete_existing_res: bool = False):
-        super().__init__(res_save_path=None, delete_existing_res=delete_existing_res)
+        super().__init__(res_save_path=config.res_save_path, delete_existing_res=delete_existing_res)
         self.config = config
 
         self.target_model = None
@@ -657,11 +657,15 @@ class MMLManager(BaseAttackManager):
         if self.target_model is None:
             raise ValueError("Target model is not configured.")
 
+        merged_inputs = dict(inputs) if isinstance(inputs, dict) else {}
         if image_path is not None:
-            data_url = local_image_to_data_url(image_path)
-            inputs = {"images": [data_url]}
-        inputs = self._normalize_inputs_images(inputs)
-        messages = build_messages(prompt, inputs=inputs)
+            merged_inputs["images"] = [image_path]
+        merged_inputs = self._normalize_inputs_images(merged_inputs)
+        messages = build_messages(
+            prompt,
+            inputs=merged_inputs,
+            system_prompt=self.config.target_system_prompt,
+        )
         return self.target_model.chat(
             messages,
             max_tokens=self.config.target_max_n_tokens,
@@ -705,18 +709,10 @@ class MMLManager(BaseAttackManager):
         evaluation_prompt = judge_template % (original_prompt, output_text)
 
         if self.eval_model is None:
-            if not self.config.api_key:
-                return 0
-            client = openai.OpenAI(api_key=self.config.api_key)
-            response = client.chat.completions.create(
-                model=self.config.eval_model_name,
-                messages=[{"role": "user", "content": evaluation_prompt}],
-            )
-            evaluation_response = response.choices[0].message.content
-        else:
-            evaluation_response = self.eval_model.chat([
-                {"role": "user", "content": evaluation_prompt}
-            ])
+            return 0
+        evaluation_response = self.eval_model.chat([
+            {"role": "user", "content": evaluation_prompt}
+        ])
 
         if not evaluation_response:
             return 0
@@ -780,6 +776,7 @@ class MMLManager(BaseAttackManager):
             result_save_path = self.config.save_dir
             os.makedirs(result_save_path, exist_ok=True)
             result_save_file = os.path.join(result_save_path, "result.jsonl")
+        self.res_save_path = result_save_file
         processed_count = 0
         if os.path.exists(result_save_file):
             with open(result_save_file, "r", encoding="utf-8") as f:
@@ -787,12 +784,19 @@ class MMLManager(BaseAttackManager):
                     if line.strip():
                         processed_count += 1
 
-        for idx, example in enumerate(dataset.data):
+        for idx, example in enumerate(dataset):
             if idx < processed_count:
                 continue
 
-            item = example.__dict__
-            original_prompt = item.get("query") or item.get("prompt") or item.get("original_prompt") or ""
+            item = dict(example)
+            original_prompt = (
+                item.get("query")
+                or item.get("prompt")
+                or item.get("question")
+                or item.get("instruction")
+                or item.get("original_prompt")
+                or ""
+            )
 
             if self.config.image_format in dataformat2prompt:
                 question = self._build_question(item, self.config.image_format, self.config.dataset)
@@ -804,7 +808,7 @@ class MMLManager(BaseAttackManager):
                 question = original_prompt
 
             question = self._apply_defense(question)
-            inputs = item.get("inputs", {})
+            inputs = dict(item.get("inputs", {})) if isinstance(item.get("inputs", {}), dict) else {}
             transformed_image_path = None
             transformed_image_rel = None
             if self.config.image_format in ["images_wr", "images_mirror", "images_rotate", "images_base64"]:
@@ -818,7 +822,7 @@ class MMLManager(BaseAttackManager):
                         transformed_image_path = _build_transformed_image(source_image, self.config.image_format, item, output_path=out_path)
                     else:
                         transformed_image_path = _build_transformed_image(source_image, self.config.image_format, item)
-                    inputs = {"images": [transformed_image_path]}
+                    inputs["images"] = [transformed_image_path]
 
             score_list = []
             res_list = []
@@ -868,9 +872,10 @@ class MMLManager(BaseAttackManager):
             final_image_rel = item.get("final_image_rel") or item.get("modified_image_rel") or transformed_image_rel
             if final_image_rel is not None:
                 result_rec["final_image_rel"] = final_image_rel
+            if transformed_image_path and self.config.keep_transformed_images:
+                result_rec["final_image"] = transformed_image_path
 
-            with open(result_save_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(result_rec, ensure_ascii=False) + "\n")
+            self.save(result_rec)
 
             if transformed_image_path and not self.config.keep_transformed_images:
                 try:

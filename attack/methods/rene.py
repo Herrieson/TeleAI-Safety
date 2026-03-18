@@ -155,7 +155,12 @@ def _safe_chat_call(model, messages_or_prompt):
 
     # 3) try dict payloads
     try:
-        for payload in ({"messages": messages_or_prompt} if not isinstance(messages_or_prompt, dict) else [messages_or_prompt, {"prompt": prompt}]):
+        payloads = (
+            [{"messages": messages_or_prompt}]
+            if not isinstance(messages_or_prompt, dict)
+            else [messages_or_prompt, {"prompt": prompt}]
+        )
+        for payload in payloads:
             try:
                 raw = model.chat(payload)
                 text = _normalize_resp(raw)
@@ -358,17 +363,37 @@ class ReneManager(BaseAttackManager):
     def _attack_with_model(self, prompt: str, inputs: Optional[dict] = None) -> str:
         input_message = build_messages(prompt, inputs=inputs, system_prompt=None)
         response = self.target_model.chat(input_message)
-        if not response:
+        response_text = _normalize_resp(response)
+        if not response_text:
             return "[GenerationFailed] No response from model."
-        return response
+        return response_text
 
-    def _append_result_minimal(self, idx: int, query: str, final_query: str, response: str, base_record: Optional[dict] = None):
+    def _append_result_minimal(
+        self,
+        idx: int,
+        query: str,
+        final_query: str,
+        response: str,
+        rewritten_query: Optional[str] = None,
+        base_record: Optional[dict] = None,
+    ):
         rec = dict(base_record) if isinstance(base_record, dict) else {}
-        rec.update({"example_idx": idx, "query": query, "final_query": final_query, "response": response})
+        rec.update(
+            {
+                "example_idx": idx,
+                "query": query,
+                "final_query": final_query,
+                "response": response,
+            }
+        )
+        if rewritten_query is not None:
+            rec["rewritten_query"] = rewritten_query
         res_path = getattr(self.config, "res_save_path", None)
         if res_path:
             try:
-                os.makedirs(os.path.dirname(res_path), exist_ok=True)
+                res_dir = os.path.dirname(res_path)
+                if res_dir:
+                    os.makedirs(res_dir, exist_ok=True)
                 with open(res_path, "a", encoding="utf-8") as fout:
                     fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     fout.flush()
@@ -381,7 +406,6 @@ class ReneManager(BaseAttackManager):
     def attack(self):
         logger.info("Rene attack started.")
         for idx, harm_behavior in enumerate(tqdm(self.data.harmful_behaviors, desc="Rene Attacking")):
-            start_time = time.time()
             inputs = None
             base_record = None
             if isinstance(harm_behavior, dict):
@@ -395,7 +419,7 @@ class ReneManager(BaseAttackManager):
                 continue
 
             # 2) optionally evaluate harmfulness - but we do NOT use this label in saved JSON
-            label = self.evaluator.evaluate_harmfulness(rewritten) if self.evaluator else None
+            _ = self.evaluator.evaluate_harmfulness(rewritten) if self.evaluator else None
 
             # 3) nest into scenario
             nested = self._nest_scenario(rewritten)
@@ -404,7 +428,14 @@ class ReneManager(BaseAttackManager):
             attack_output = self._attack_with_model(nested, inputs=inputs)
 
             # 5) store minimal JSONL
-            self._append_result_minimal(idx, harm_behavior, rewritten, attack_output, base_record=base_record)
+            self._append_result_minimal(
+                idx=idx,
+                query=harm_behavior,
+                final_query=nested,
+                response=attack_output,
+                rewritten_query=rewritten,
+                base_record=base_record,
+            )
 
             # small delay if needed
             if getattr(self.config, "round_sleep", 0):
