@@ -1,8 +1,9 @@
+import argparse
 import csv
 import os
 import re
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -194,6 +195,12 @@ def collect_reports() -> List[Dict[str, str]]:
     return rows
 
 
+def filter_rows_by_scorers(rows: List[Dict[str, str]], include_scorers: Optional[Set[str]]) -> List[Dict[str, str]]:
+    if not include_scorers:
+        return rows
+    return [row for row in rows if row.get("scorer") in include_scorers]
+
+
 def compute_run_avg_metric(
     rows: List[Dict[str, str]],
     field: str,
@@ -331,11 +338,26 @@ def write_markdown(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--include-scorers",
+        nargs="*",
+        default=[],
+        help="Only keep these scorer names in summary outputs (exact match). Example: --include-scorers GPT5Scorer DSV3Scorer",
+    )
+    args = parser.parse_args()
+
     if not os.path.isdir(REPORT_DIR):
         raise SystemExit(f"Report directory not found: {REPORT_DIR}")
     rows = collect_reports()
     if not rows:
         raise SystemExit("No valid report files found.")
+    include_scorers = set(args.include_scorers) if args.include_scorers else None
+    rows = filter_rows_by_scorers(rows, include_scorers)
+    if not rows:
+        if include_scorers:
+            raise SystemExit(f"No rows left after scorer filter: {sorted(include_scorers)}")
+        raise SystemExit("No valid report rows after filtering.")
     frr_by_run = collect_frr_by_run()
     if frr_by_run:
         for row in rows:

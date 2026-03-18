@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # 批量对 results/*.jsonl 运行多个 scorer，并将结果写入 evaluation_report/asr/<输入文件名>/ 下。
-# 默认仅跑 GPTScorer / DSV3Scorer。可通过环境变量 EVAL_SCORERS 覆盖，例如：
-#   EVAL_SCORERS="GPTScorer DSV3Scorer DSR1Scorer" ./eval_demo.sh
+# 默认使用当前推荐组合：GPT5Scorer / DSV3Scorer。可通过环境变量 EVAL_SCORERS 覆盖，例如：
+#   EVAL_SCORERS="GPT5Scorer DSV3Scorer DSR1Scorer" ./eval_demo.sh
 #
 # 快速冒烟模式（推荐用于流程连通性检查）：
 #   EVAL_PROFILE=smoke ./eval_demo.sh
@@ -55,16 +55,16 @@ RUN_LEGACY_ASR="${RUN_LEGACY_ASR:-}"
 
 # 默认 scorer 列表（按需扩展）
 # full 模式支持通过 EVAL_SCORER_PROFILE 选择内置组合：
-#   - fast:     GPTScorer + DSV3Scorer（速度优先）
-#   - balanced: GPTScorer + DSV3Scorer + GPT5Scorer（默认）
-#   - robust:   GPTScorer + DSV3Scorer + GPT5Scorer（稳健优先）
+#   - fast:     GPT5Scorer + DSV3Scorer
+#   - balanced: GPT5Scorer + DSV3Scorer（默认，推荐）
+#   - robust:   GPT5Scorer + DSV3Scorer（可选附加 DSR1Scorer）
 # 可选扩展：
 #   - EVAL_INCLUDE_DSR1=true 时，在 robust 方案中追加 DSR1Scorer
 EVAL_SCORER_PROFILE="${EVAL_SCORER_PROFILE:-balanced}"
 EVAL_INCLUDE_DSR1="${EVAL_INCLUDE_DSR1:-false}"
-FAST_SCORERS=("GPTScorer" "DSV3Scorer")
-BALANCED_SCORERS=("GPTScorer" "DSV3Scorer" "GPT5Scorer")
-ROBUST_SCORERS=("GPTScorer" "DSV3Scorer" "GPT5Scorer")
+FAST_SCORERS=("GPT5Scorer" "DSV3Scorer")
+BALANCED_SCORERS=("GPT5Scorer" "DSV3Scorer")
+ROBUST_SCORERS=("GPT5Scorer" "DSV3Scorer")
 if [[ "${EVAL_PROFILE}" == "smoke" ]]; then
   # shellcheck disable=SC2206
   DEFAULT_SCORERS=(${SMOKE_SCORERS})
@@ -80,7 +80,8 @@ else
   RUN_TERNARY="${RUN_TERNARY:-true}"
   RUN_DASHBOARD="${RUN_DASHBOARD:-true}"
   RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-true}"
-  RUN_LEGACY_ASR="${RUN_LEGACY_ASR:-true}"
+  # 推荐主口径为 non-legacy（GPT5Scorer + DSV3Scorer），默认关闭 legacy 避免额外重跑与过滤报错。
+  RUN_LEGACY_ASR="${RUN_LEGACY_ASR:-false}"
   case "${EVAL_SCORER_PROFILE}" in
     fast)
       DEFAULT_SCORERS=("${FAST_SCORERS[@]}")
@@ -154,9 +155,9 @@ declare -A CONFIG_MAP=(
 declare -A LEGACY_CONFIG_MAP=(
   ["GPTScorer"]="${ASR_ROOT}/config/gpt_scorer_legacy.yaml"
   ["DSV3Scorer"]="${ASR_ROOT}/config/dsv3_scorer_legacy.yaml"
-  ["GPT5Scorer"]="${ASR_ROOT}/config/gpt5_scorer_legacy.yaml"
 )
-LEGACY_SCORERS=("GPTScorer" "DSV3Scorer" "GPT5Scorer")
+# legacy 口径建议使用 GPT + DSV3
+LEGACY_SCORERS=("GPTScorer" "DSV3Scorer")
 
 if [[ -n "${RESULT_MANIFEST}" ]]; then
   if [[ ! -f "${RESULT_MANIFEST}" ]]; then
@@ -307,10 +308,12 @@ process_one_result_file() {
         echo "Skip legacy ${legacy_scorer} on ${rel_path}: legacy config not found ${legacy_cfg}" >&2
         continue
       fi
-      local legacy_out_path="${output_dir}/${base_name}_legacy_${legacy_scorer}.txt"
+      # 传入统一 legacy 前缀，最终文件由 evaluate_metrics.py 自动追加 scorer tag。
+      local legacy_out_path="${output_dir}/${base_name}_legacy.txt"
       local legacy_asr_label_path="${asr_label_dir}/${base_name}_${legacy_scorer}_legacy.jsonl"
       local legacy_report_exists=0
-      if [[ -f "${legacy_out_path}" ]]; then
+      # 兼容旧命名（*_legacy_<scorer>_<scorer>.txt）与新命名（*_legacy_<scorer>.txt）
+      if compgen -G "${output_dir}/${base_name}_legacy_${legacy_scorer}*.txt" > /dev/null; then
         legacy_report_exists=1
       fi
       if [[ ${legacy_report_exists} -eq 1 && -f "${legacy_asr_label_path}" ]]; then
@@ -433,7 +436,14 @@ fi
 
 # 计算平均各个 scorer 的平均 ASR 并总结到 csv，markdown 文件中
 echo "Summarizing reports in ${OUTPUT_ROOT}"
-uv run python report/summarize_reports.py
+SUMMARIZE_SCORERS=("${SCORERS[@]}")
+if [[ "${RUN_LEGACY_ASR}" == "true" ]]; then
+  for legacy_scorer in "${LEGACY_SCORERS[@]}"; do
+    SUMMARIZE_SCORERS+=("${legacy_scorer}Legacy")
+  done
+fi
+uv run python report/summarize_reports.py \
+  --include-scorers "${SUMMARIZE_SCORERS[@]}"
 
 if [[ "${RUN_KAPPA}" == "true" ]]; then
   # 生成 Kappa 一致性报告（基于 summary_wide.csv）
