@@ -338,7 +338,21 @@ def write_markdown(
 
 
 def main() -> None:
+    global REPORT_DIR, FRR_REPORT_DIR, RESULTS_DIR, ALT_RESULTS_DIR, ASR_LABEL_DIR, FRR_LABEL_DIR, LONG_CSV, WIDE_CSV, MARKDOWN
     parser = argparse.ArgumentParser()
+    parser.add_argument("--report-dir", default=REPORT_DIR, help="Directory containing ASR report txt files")
+    parser.add_argument("--frr-report-dir", default=FRR_REPORT_DIR, help="Directory containing FRR report txt files")
+    parser.add_argument("--results-dir", default=RESULTS_DIR, help="Primary attack results root used for path normalization")
+    parser.add_argument(
+        "--alt-results-dir",
+        default=ALT_RESULTS_DIR,
+        help="Secondary attack results root used for path normalization",
+    )
+    parser.add_argument("--asr-label-dir", default=ASR_LABEL_DIR, help="ASR label root used for path normalization")
+    parser.add_argument("--frr-label-dir", default=FRR_LABEL_DIR, help="FRR label root used for path normalization")
+    parser.add_argument("--long-csv", default=LONG_CSV, help="Output path for summary_long.csv")
+    parser.add_argument("--wide-csv", default=WIDE_CSV, help="Output path for summary_wide.csv")
+    parser.add_argument("--markdown", default=MARKDOWN, help="Output path for summary markdown")
     parser.add_argument(
         "--include-scorers",
         nargs="*",
@@ -346,6 +360,16 @@ def main() -> None:
         help="Only keep these scorer names in summary outputs (exact match). Example: --include-scorers GPT5Scorer DSV3Scorer",
     )
     args = parser.parse_args()
+
+    REPORT_DIR = os.path.abspath(args.report_dir)
+    FRR_REPORT_DIR = os.path.abspath(args.frr_report_dir)
+    RESULTS_DIR = os.path.abspath(args.results_dir)
+    ALT_RESULTS_DIR = os.path.abspath(args.alt_results_dir)
+    ASR_LABEL_DIR = os.path.abspath(args.asr_label_dir)
+    FRR_LABEL_DIR = os.path.abspath(args.frr_label_dir)
+    LONG_CSV = os.path.abspath(args.long_csv)
+    WIDE_CSV = os.path.abspath(args.wide_csv)
+    MARKDOWN = os.path.abspath(args.markdown)
 
     if not os.path.isdir(REPORT_DIR):
         raise SystemExit(f"Report directory not found: {REPORT_DIR}")
@@ -378,7 +402,10 @@ def main() -> None:
                 row["skipped_samples"] = frr_values.get("skipped", "")
     run_avg_asr = compute_run_avg_asr(rows)
     run_avg_asr_effective = compute_run_avg_asr_effective(rows)
-    os.makedirs(REPORT_DIR, exist_ok=True)
+    for output_path in (LONG_CSV, WIDE_CSV, MARKDOWN):
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
     write_long_csv(rows, run_avg_asr, run_avg_asr_effective)
     write_wide_csv(rows, run_avg_asr, run_avg_asr_effective)
     write_markdown(rows, run_avg_asr, run_avg_asr_effective)

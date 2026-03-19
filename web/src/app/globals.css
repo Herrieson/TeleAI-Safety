@@ -1,0 +1,198 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-ink: #1c2b3a;
+  --color-ink-soft: #5f7184;
+  --color-mist: #f4f6f8;
+  --color-panel: #ffffff;
+  --color-accent: #1661c2;
+  --color-accent-strong: #0f4f9f;
+  --color-signal: #157a67;
+  --color-warn: #ab6a22;
+  --color-good: #1f8a53;
+  --color-border: #dfe4ea;
+  --shadow-panel: 0 12px 28px rgba(19, 34, 48, 0.08);
+  --shadow-raised: 0 8px 20px rgba(19, 34, 48, 0.1);
+  --font-headline: "Avenir Next", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", "Menlo", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--color-ink);
+  font-family: var(--font-body), sans-serif;
+  background: linear-gradient(180deg, #f8fafc, var(--color-mist));
+  line-height: 1.45;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.shell {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 26px 16px 34px;
+}
+
+.topbar {
+  padding: 16px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #fbfcfd);
+  box-shadow: var(--shadow-panel);
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-panel);
+  border-radius: 16px;
+}
+
+.btn {
+  border: 1px solid #d4dbe4;
+  border-radius: 10px;
+  padding: 8px 13px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  color: var(--color-ink);
+  font-weight: 600;
+  font-family: var(--font-headline), sans-serif;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(19, 34, 48, 0.05);
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  box-shadow: 0 6px 14px rgba(19, 34, 48, 0.1);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong));
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 8px 18px rgba(22, 97, 194, 0.24);
+}
+
+.btn-primary:hover {
+  color: white;
+  background: linear-gradient(135deg, #0d67d2, #0a56b6);
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6a7b8d;
+  font-family: var(--font-mono), monospace;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  border: 1px solid #d6dde6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--color-ink);
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(22, 97, 194, 0.14);
+}
+
+.mono {
+  font-family: var(--font-mono), monospace;
+}
+
+.tab-btn {
+  border: 1px solid #d4dbe4;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, #ffffff, #f9fbfd);
+  color: var(--color-ink-soft);
+  font-family: var(--font-headline), sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: capitalize;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.tab-btn:hover {
+  border-color: #b9c9dc;
+  color: var(--color-ink);
+}
+
+.tab-btn-active {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong));
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(22, 97, 194, 0.24);
+}
+
+.log-console {
+  max-height: 540px;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid #20364b;
+  background: linear-gradient(180deg, #122336, #0f1f30);
+  padding: 14px;
+  color: #d7e4f0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 10px 24px rgba(13, 27, 40, 0.2);
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 14px 12px 24px;
+  }
+
+  .topbar {
+    padding: 12px;
+    border-radius: 14px;
+  }
+}

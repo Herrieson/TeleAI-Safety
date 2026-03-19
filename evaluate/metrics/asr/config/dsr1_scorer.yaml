@@ -1,11 +1,9 @@
 role: None
 debate: false
 model: gpt-4o  # Azure 部署名或直连模型名
-# api_key_env: OPENAI_API_KEY
-# 可选：自定义接口地址（如代理），默认留空
-# api_base: https://api.openai.com/v1
-
-# 如使用 Azure OpenAI，可设置：
-api_key_env: AZURE_OPENAI_API_KEY
+api_key_env: OPENAI_API_KEY
+# 可选：若值是全大写字符串，则按环境变量名读取（例如 OPENAI_BASE_URL）。
+api_base: OPENAI_BASE_URL
+# Azure fallback（当 OPENAI_BASE_URL 为空且设置了 AZURE_OPENAI_ENDPOINT 时生效）
 azure_endpoint_env: AZURE_OPENAI_ENDPOINT
 azure_api_version: AZURE_OPENAI_API_VERSION

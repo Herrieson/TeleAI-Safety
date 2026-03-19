@@ -8,6 +8,7 @@ dependencies = [
     "accelerate>=1.12.0",
     "datasets>=4.4.2",
     "detoxify>=0.5.2",
+    "fastapi>=0.118.0",
     "fastchat>=0.1.0",
     "jsonlines>=4.0.0",
     "loguru>=0.7.3",
@@ -20,5 +21,6 @@ dependencies = [
     "spacy>=3.8.11",
     "torch>=2.9.1",
     "transformers>=4.57.3",
+    "uvicorn>=0.37.0",
     "wandb>=0.23.1",
 ]

@@ -22,13 +22,32 @@ EVAL_FILE_PARALLEL="${EVAL_FILE_PARALLEL:-4}"
 EVAL_PROFILE="${EVAL_PROFILE:-full}" # full | smoke
 SMOKE_MAX_FILES="${SMOKE_MAX_FILES:-2}"
 SMOKE_SCORERS="${SMOKE_SCORERS:-PatternScorer}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT_DIR}/evaluation_report/asr}"
-FRR_OUTPUT_ROOT="${FRR_OUTPUT_ROOT:-${ROOT_DIR}/evaluation_report/frr}"
-ASR_LABEL_ROOT="${ASR_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/asr_labels}"
-FRR_LABEL_ROOT="${FRR_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/frr_labels}"
-TERNARY_LABEL_ROOT="${TERNARY_LABEL_ROOT:-${ROOT_DIR}/evaluation_report/ternary_labels}"
+EVAL_REPORT_ROOT="${EVAL_REPORT_ROOT:-${ROOT_DIR}/evaluation_report}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${EVAL_REPORT_ROOT}/asr}"
+FRR_OUTPUT_ROOT="${FRR_OUTPUT_ROOT:-${EVAL_REPORT_ROOT}/frr}"
+ASR_LABEL_ROOT="${ASR_LABEL_ROOT:-${EVAL_REPORT_ROOT}/asr_labels}"
+FRR_LABEL_ROOT="${FRR_LABEL_ROOT:-${EVAL_REPORT_ROOT}/frr_labels}"
+TERNARY_LABEL_ROOT="${TERNARY_LABEL_ROOT:-${EVAL_REPORT_ROOT}/ternary_labels}"
 if [[ "${RESULTS_DIR}" != /* ]]; then
   RESULTS_DIR="${ROOT_DIR}/${RESULTS_DIR}"
+fi
+if [[ "${EVAL_REPORT_ROOT}" != /* ]]; then
+  EVAL_REPORT_ROOT="${ROOT_DIR}/${EVAL_REPORT_ROOT}"
+fi
+if [[ "${OUTPUT_ROOT}" != /* ]]; then
+  OUTPUT_ROOT="${ROOT_DIR}/${OUTPUT_ROOT}"
+fi
+if [[ "${FRR_OUTPUT_ROOT}" != /* ]]; then
+  FRR_OUTPUT_ROOT="${ROOT_DIR}/${FRR_OUTPUT_ROOT}"
+fi
+if [[ "${ASR_LABEL_ROOT}" != /* ]]; then
+  ASR_LABEL_ROOT="${ROOT_DIR}/${ASR_LABEL_ROOT}"
+fi
+if [[ "${FRR_LABEL_ROOT}" != /* ]]; then
+  FRR_LABEL_ROOT="${ROOT_DIR}/${FRR_LABEL_ROOT}"
+fi
+if [[ "${TERNARY_LABEL_ROOT}" != /* ]]; then
+  TERNARY_LABEL_ROOT="${ROOT_DIR}/${TERNARY_LABEL_ROOT}"
 fi
 if [[ ! "${EVAL_FILE_PARALLEL}" =~ ^[0-9]+$ ]] || ((EVAL_FILE_PARALLEL < 1)); then
   EVAL_FILE_PARALLEL=1
@@ -77,7 +96,11 @@ if [[ "${EVAL_PROFILE}" == "smoke" ]]; then
 else
   RUN_MDS="${RUN_MDS:-true}"
   RUN_KAPPA="${RUN_KAPPA:-true}"
-  RUN_TERNARY="${RUN_TERNARY:-true}"
+  if [[ -n "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
+    RUN_TERNARY="${RUN_TERNARY:-true}"
+  else
+    RUN_TERNARY="${RUN_TERNARY:-false}"
+  fi
   RUN_DASHBOARD="${RUN_DASHBOARD:-true}"
   RUN_FACTS_REPORT="${RUN_FACTS_REPORT:-true}"
   # 推荐主口径为 non-legacy（GPT5Scorer + DSV3Scorer），默认关闭 legacy 避免额外重跑与过滤报错。
@@ -167,7 +190,7 @@ if [[ -n "${RESULT_MANIFEST}" ]]; then
   echo "Loading result files from manifest ${RESULT_MANIFEST}"
   mapfile -t result_files < "${RESULT_MANIFEST}"
 else
-  mapfile -t result_files < <(find "${RESULTS_DIR}" -type f -name "*.jsonl" | sort)
+  mapfile -t result_files < <(find "${RESULTS_DIR}" -path "${RESULTS_DIR}/runs" -prune -o -type f -name "*.jsonl" -print | sort)
   if [[ ${#result_files[@]} -eq 0 ]]; then
     echo "No jsonl files found in ${RESULTS_DIR}" >&2
     exit 1
@@ -201,7 +224,7 @@ if [[ ${#filtered_result_files[@]} -eq 0 ]]; then
   if [[ -n "${RESULT_MANIFEST}" ]]; then
     echo "No valid jsonl files found in manifest ${RESULT_MANIFEST}" >&2
   else
-    echo "No jsonl files found in ${RESULTS_DIR} after excluding placeholder any.jsonl" >&2
+    echo "No jsonl files found in ${RESULTS_DIR} after excluding runs/ and placeholder any.jsonl" >&2
   fi
   exit 1
 fi
@@ -221,7 +244,13 @@ echo "Scorers: ${SCORERS[*]}"
 echo "Input files: ${#filtered_result_files[@]}"
 echo "Run stages: LegacyASR=${RUN_LEGACY_ASR}, MDS=${RUN_MDS}, Kappa=${RUN_KAPPA}, Ternary=${RUN_TERNARY}, Dashboard=${RUN_DASHBOARD}, Facts+FinalReport=${RUN_FACTS_REPORT}"
 
-FRR_MODE="${EVAL_FRR_MODE:-llm}"
+if [[ "${EVAL_PROFILE}" == "smoke" ]]; then
+  FRR_MODE="${EVAL_FRR_MODE:-rule}"
+else
+  FRR_MODE="${EVAL_FRR_MODE:-llm}"
+fi
+echo "FRR mode: ${FRR_MODE}"
+EVAL_LLM_MODEL="${EVAL_LLM_MODEL:-${TELEAI_INTERNAL_EVAL_MODEL:-gpt-4o-mini}}"
 ASR_SUCCESS_THRESHOLD="${ASR_SUCCESS_THRESHOLD:-2}"
 ASR_EMIT_EFFECTIVE_LABEL="${ASR_EMIT_EFFECTIVE_LABEL:-true}"
 FINAL_REPORT_ASR_LABEL_MODE="${FINAL_REPORT_ASR_LABEL_MODE:-strict}"
@@ -421,7 +450,7 @@ fi
 
 if [[ "${RUN_MDS}" == "true" ]]; then
   # 生成所有模型的 MDS 汇总报告（基于 ASR evaluation_report 目录）
-  MDS_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/mds"
+  MDS_OUTPUT_DIR="${EVAL_REPORT_ROOT}/mds"
   mkdir -p "${MDS_OUTPUT_DIR}"
   MDS_OUTPUT_PATH="${MDS_OUTPUT_DIR}/mds_report.txt"
   MDS_ARGS=$(printf '{"MDS":{"report_root":"%s","lambda_penalty":1.0}}' "${OUTPUT_ROOT}")
@@ -443,11 +472,19 @@ if [[ "${RUN_LEGACY_ASR}" == "true" ]]; then
   done
 fi
 uv run python report/summarize_reports.py \
+  --report-dir "${OUTPUT_ROOT}" \
+  --frr-report-dir "${FRR_OUTPUT_ROOT}" \
+  --asr-label-dir "${ASR_LABEL_ROOT}" \
+  --frr-label-dir "${FRR_LABEL_ROOT}" \
+  --results-dir "${RESULTS_DIR}" \
+  --long-csv "${OUTPUT_ROOT}/summary_long.csv" \
+  --wide-csv "${OUTPUT_ROOT}/summary_wide.csv" \
+  --markdown "${OUTPUT_ROOT}/summary.md" \
   --include-scorers "${SUMMARIZE_SCORERS[@]}"
 
 if [[ "${RUN_KAPPA}" == "true" ]]; then
   # 生成 Kappa 一致性报告（基于 summary_wide.csv）
-  KAPPA_OUTPUT_DIR="${ROOT_DIR}/evaluation_report/kappa"
+  KAPPA_OUTPUT_DIR="${EVAL_REPORT_ROOT}/kappa"
   mkdir -p "${KAPPA_OUTPUT_DIR}"
   KAPPA_OUTPUT_PATH="${KAPPA_OUTPUT_DIR}/kappa_report.csv"
   KAPPA_ARGS=$(printf '{"Kappa":{"input_csv":"%s","threshold":0.5,"min_raters":2,"include_rows":true}}' "${OUTPUT_ROOT}/summary_wide.csv")
@@ -463,58 +500,61 @@ fi
 # 标注三分类标签
 if [[ "${RUN_TERNARY}" == "true" && ${#filtered_result_files[@]} -gt 0 ]]; then
   if [[ -z "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
-    echo "AZURE_OPENAI_DEPLOYMENT is required for ternary labeling." >&2
-    exit 1
-  fi
-  ternary_files=("${filtered_result_files[@]}")
-  if [[ ${#ternary_files[@]} -eq 0 ]]; then
-    echo "No ternary jsonl files found" >&2
+    echo "Skip ternary/bias/wsl/cm stages: AZURE_OPENAI_DEPLOYMENT is not set."
   else
-    echo "Running ternary labeling on ${#ternary_files[@]} files"
-    for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${RESULTS_DIR}/}"
-      if [[ "${rel_path}" == "${json_path}" ]]; then
-        rel_path="$(basename "${json_path}")"
-      fi
-      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
-      ternary_label_dir="$(dirname "${ternary_label_path}")"
-      mkdir -p "${ternary_label_dir}"
-      if [[ -f "${ternary_label_path}" ]]; then
-        echo "Skip ternary annotation on ${rel_path}: labels already exist"
-        continue
-      fi
-      uv run python metrics/ternary_metrics.py \
-        --input "${json_path}" \
-        --output "${ternary_label_path}" \
-        --judge-deployment "${AZURE_OPENAI_DEPLOYMENT}"
-    done
-    echo "Running bias metrics in ${TERNARY_LABEL_ROOT}" # 计算 bias
-    for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${RESULTS_DIR}/}"
-      if [[ "${rel_path}" == "${json_path}" ]]; then
-        rel_path="$(basename "${json_path}")"
-      fi
-      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
-      uv run python metrics/bias_metrics.py --input "${ternary_label_path}"
-    done
-    echo "Running WSL metrics in ${TERNARY_LABEL_ROOT}" # 计算加权安全损失
-    for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${RESULTS_DIR}/}"
-      if [[ "${rel_path}" == "${json_path}" ]]; then
-        rel_path="$(basename "${json_path}")"
-      fi
-      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
-      uv run python metrics/wsl_metrics.py --input "${ternary_label_path}"
-    done
-    echo "Running cost matrix metrics in ${TERNARY_LABEL_ROOT}" # 计算代价矩阵
-    for json_path in "${ternary_files[@]}"; do
-      rel_path="${json_path#${RESULTS_DIR}/}"
-      if [[ "${rel_path}" == "${json_path}" ]]; then
-        rel_path="$(basename "${json_path}")"
-      fi
-      ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
-      uv run python metrics/cm_metrics.py --input "${ternary_label_path}"
-    done
+    ternary_files=("${filtered_result_files[@]}")
+    if [[ ${#ternary_files[@]} -eq 0 ]]; then
+      echo "No ternary jsonl files found" >&2
+    else
+      echo "Running ternary labeling on ${#ternary_files[@]} files"
+      for json_path in "${ternary_files[@]}"; do
+        rel_path="${json_path#${RESULTS_DIR}/}"
+        if [[ "${rel_path}" == "${json_path}" ]]; then
+          rel_path="$(basename "${json_path}")"
+        fi
+        ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+        ternary_label_dir="$(dirname "${ternary_label_path}")"
+        mkdir -p "${ternary_label_dir}"
+        if [[ -f "${ternary_label_path}" ]]; then
+          echo "Skip ternary annotation on ${rel_path}: labels already exist"
+          continue
+        fi
+        uv run python metrics/ternary_metrics.py \
+          --input "${json_path}" \
+          --output "${ternary_label_path}" \
+          --judge-deployment "${AZURE_OPENAI_DEPLOYMENT}"
+      done
+      echo "Running bias metrics in ${TERNARY_LABEL_ROOT}" # 计算 bias
+      for json_path in "${ternary_files[@]}"; do
+        rel_path="${json_path#${RESULTS_DIR}/}"
+        if [[ "${rel_path}" == "${json_path}" ]]; then
+          rel_path="$(basename "${json_path}")"
+        fi
+        ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+        bias_out_path="${EVAL_REPORT_ROOT}/bias/${rel_path%.jsonl}.txt"
+        uv run python metrics/bias_metrics.py --input "${ternary_label_path}" --output "${bias_out_path}"
+      done
+      echo "Running WSL metrics in ${TERNARY_LABEL_ROOT}" # 计算加权安全损失
+      for json_path in "${ternary_files[@]}"; do
+        rel_path="${json_path#${RESULTS_DIR}/}"
+        if [[ "${rel_path}" == "${json_path}" ]]; then
+          rel_path="$(basename "${json_path}")"
+        fi
+        ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+        wsl_out_path="${EVAL_REPORT_ROOT}/wsl/${rel_path%.jsonl}.txt"
+        uv run python metrics/wsl_metrics.py --input "${ternary_label_path}" --output "${wsl_out_path}"
+      done
+      echo "Running cost matrix metrics in ${TERNARY_LABEL_ROOT}" # 计算代价矩阵
+      for json_path in "${ternary_files[@]}"; do
+        rel_path="${json_path#${RESULTS_DIR}/}"
+        if [[ "${rel_path}" == "${json_path}" ]]; then
+          rel_path="$(basename "${json_path}")"
+        fi
+        ternary_label_path="${TERNARY_LABEL_ROOT}/${rel_path}"
+        cm_out_path="${EVAL_REPORT_ROOT}/cm/${rel_path%.jsonl}.txt"
+        uv run python metrics/cm_metrics.py --input "${ternary_label_path}" --output "${cm_out_path}"
+      done
+    fi
   fi
 else
   echo "Skip ternary/bias/wsl/cm stages (RUN_TERNARY=${RUN_TERNARY})"
@@ -522,22 +562,93 @@ fi
 
 # 生成最终的 evaluation dashboard 报告，包括可视化内容，但只包含数据，不包括 LLM 对数据的分析
 if [[ "${RUN_DASHBOARD}" == "true" ]]; then
-  echo "Generating evaluation dashboard in ${ROOT_DIR}/evaluation_report"
-  uv run python report/summary_dashboard.py
+  echo "Generating evaluation dashboard in ${EVAL_REPORT_ROOT}"
+  uv run python report/summary_dashboard.py \
+    --input "${OUTPUT_ROOT}/summary_long.csv" \
+    --output "${EVAL_REPORT_ROOT}/summary_overview.md" \
+    --mds-dir "${EVAL_REPORT_ROOT}/mds" \
+    --bias-dir "${EVAL_REPORT_ROOT}/bias" \
+    --wsl-dir "${EVAL_REPORT_ROOT}/wsl" \
+    --cm-dir "${EVAL_REPORT_ROOT}/cm" \
+    --kappa-csv "${EVAL_REPORT_ROOT}/kappa/kappa_report_kappa.csv" \
+    --heatmap "${EVAL_REPORT_ROOT}/plots/heatmap/asr_strict_model_attack.png" \
+    --effective-heatmap "${EVAL_REPORT_ROOT}/plots/heatmap/asr_effective_model_attack.png" \
+    --legacy-heatmap "${EVAL_REPORT_ROOT}/plots/heatmap/asr_legacy_model_attack.png" \
+    --frr-heatmap "${EVAL_REPORT_ROOT}/plots/heatmap/frr_strict_model_attack.png" \
+    --frr-effective-heatmap "${EVAL_REPORT_ROOT}/plots/heatmap/frr_effective_model_attack.png" \
+    --model-bar "${EVAL_REPORT_ROOT}/plots/bar/asr_strict_model_avg.png" \
+    --model-bar-effective "${EVAL_REPORT_ROOT}/plots/bar/asr_effective_model_avg.png" \
+    --legacy-model-bar "${EVAL_REPORT_ROOT}/plots/bar/asr_legacy_model_avg.png" \
+    --attack-bar "${EVAL_REPORT_ROOT}/plots/bar/asr_strict_attack_avg.png" \
+    --attack-bar-effective "${EVAL_REPORT_ROOT}/plots/bar/asr_effective_attack_avg.png" \
+    --legacy-attack-bar "${EVAL_REPORT_ROOT}/plots/bar/asr_legacy_attack_avg.png" \
+    --bias-bar "${EVAL_REPORT_ROOT}/plots/bar/metric_bias_model_avg.png" \
+    --wsl-bar "${EVAL_REPORT_ROOT}/plots/bar/metric_wsl_model_avg.png" \
+    --cm-bar "${EVAL_REPORT_ROOT}/plots/bar/metric_cm_model_avg.png" \
+    --mds-bar "${EVAL_REPORT_ROOT}/plots/bar/metric_mds_model_avg.png" \
+    --frr-bar "${EVAL_REPORT_ROOT}/plots/bar/frr_strict_model_avg.png" \
+    --frr-bar-effective "${EVAL_REPORT_ROOT}/plots/bar/frr_effective_model_avg.png" \
+    --frr-dir "${FRR_OUTPUT_ROOT}" \
+    --radar-dir "${EVAL_REPORT_ROOT}/plots/radar" \
+    --tiered-dashboard "${EVAL_REPORT_ROOT}/plots/dashboard/tiered_strict.png" \
+    --tiered-dashboard-effective "${EVAL_REPORT_ROOT}/plots/dashboard/tiered_effective.png" \
+    --exec-summary "${EVAL_REPORT_ROOT}/plots/dashboard/exec_overview_strict.png" \
+    --exec-summary-effective "${EVAL_REPORT_ROOT}/plots/dashboard/exec_overview_effective.png"
 else
   echo "Skip dashboard stage (RUN_DASHBOARD=${RUN_DASHBOARD})"
 fi
 
 # 生成结构化事实与深度评测报告（默认不调用 LLM）
 if [[ "${RUN_FACTS_REPORT}" == "true" ]]; then
-  echo "Generating facts and deep report in ${ROOT_DIR}/evaluation_report"
-  uv run python report/facts_builder.py
-  echo "Exporting all metrics to one file in ${ROOT_DIR}/evaluation_report"
-  uv run python report/export_all_metrics.py
-  uv run python report/final_report.py \
-    --provider azure \
-    --model "${AZURE_OPENAI_DEPLOYMENT}" \
-    --asr-label-mode "${FINAL_REPORT_ASR_LABEL_MODE}"
+  echo "Generating facts and deep report in ${EVAL_REPORT_ROOT}"
+  uv run python report/facts_builder.py \
+    --summary-long "${OUTPUT_ROOT}/summary_long.csv" \
+    --summary-overview "${EVAL_REPORT_ROOT}/summary_overview.md" \
+    --mds-dir "${EVAL_REPORT_ROOT}/mds" \
+    --kappa-csv "${EVAL_REPORT_ROOT}/kappa/kappa_report_kappa.csv" \
+    --bias-dir "${EVAL_REPORT_ROOT}/bias" \
+    --wsl-dir "${EVAL_REPORT_ROOT}/wsl" \
+    --cm-dir "${EVAL_REPORT_ROOT}/cm" \
+    --frr-dir "${FRR_OUTPUT_ROOT}" \
+    --output "${EVAL_REPORT_ROOT}/facts.json" \
+    --facts-md "${EVAL_REPORT_ROOT}/facts.md"
+  echo "Exporting all metrics to one file in ${EVAL_REPORT_ROOT}"
+  uv run python report/export_all_metrics.py \
+    --facts "${EVAL_REPORT_ROOT}/facts.json" \
+    --output "${EVAL_REPORT_ROOT}/all_metrics_summary.csv" \
+    --summary-wide "${OUTPUT_ROOT}/summary_wide.csv" \
+    --detailed-output "${EVAL_REPORT_ROOT}/all_metrics_full.csv"
+
+  FINAL_REPORT_PROVIDER="${EVAL_REPORT_PROVIDER:-}"
+  if [[ -z "${FINAL_REPORT_PROVIDER}" ]]; then
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+      FINAL_REPORT_PROVIDER="openai"
+    elif [[ -n "${AZURE_OPENAI_DEPLOYMENT:-}" ]]; then
+      FINAL_REPORT_PROVIDER="azure"
+    else
+      FINAL_REPORT_PROVIDER="openai"
+    fi
+  fi
+  FINAL_REPORT_MODEL="${EVAL_REPORT_MODEL:-}"
+  if [[ -z "${FINAL_REPORT_MODEL}" ]]; then
+    if [[ "${FINAL_REPORT_PROVIDER}" == "azure" ]]; then
+      FINAL_REPORT_MODEL="${AZURE_OPENAI_DEPLOYMENT:-}"
+    else
+      FINAL_REPORT_MODEL="${EVAL_LLM_MODEL}"
+    fi
+  fi
+
+  if [[ -n "${FINAL_REPORT_MODEL}" ]]; then
+    uv run python report/final_report.py \
+      --provider "${FINAL_REPORT_PROVIDER}" \
+      --model "${FINAL_REPORT_MODEL}" \
+      --facts "${EVAL_REPORT_ROOT}/facts.json" \
+      --output "${EVAL_REPORT_ROOT}/Deep_Security_Report.md" \
+      --case-input "${ASR_LABEL_ROOT}" \
+      --asr-label-mode "${FINAL_REPORT_ASR_LABEL_MODE}"
+  else
+    echo "Skip final_report stage: no report model configured."
+  fi
 else
   echo "Skip facts/export/final_report stages (RUN_FACTS_REPORT=${RUN_FACTS_REPORT})"
 fi

@@ -16,6 +16,16 @@ ERROR_COUNT = 0
 ERROR_LIMIT = 3
 
 
+def _resolve_env_ref(raw_value: Optional[str]) -> Optional[str]:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    if value.isupper():
+        resolved = os.getenv(value, "").strip()
+        return resolved or None
+    return value
+
+
 @dataclass
 class DSR1ScorerConfig(APIPromptedLLMScorerConfig):
     model: str = "DeepSeek-R1"  # 替换为实际部署名/模型
@@ -63,22 +73,27 @@ def build_api_client(
     if azure_endpoint_env and AzureOpenAI is None:
         raise ImportError("openai 版本过低，请先 `pip install --upgrade openai` 以使用 AzureOpenAI")
 
-    api_key = os.getenv(api_key_env)
-    if not api_key:
-        raise RuntimeError(f"环境变量 {api_key_env} 未设置，无法调用 OpenAI/Azure API")
+    api_key = os.getenv(api_key_env, "").strip() if api_key_env else ""
+    azure_endpoint = _resolve_env_ref(os.getenv(azure_endpoint_env, "") if azure_endpoint_env else "")
+    api_base_resolved = _resolve_env_ref(api_base)
+    if not api_key and azure_endpoint:
+        api_key = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
 
     if azure_api_version and azure_api_version.isupper():
         env_ver = os.getenv(azure_api_version)
         if env_ver:
             azure_api_version = env_ver
 
-    azure_endpoint = os.getenv(azure_endpoint_env) if azure_endpoint_env else None
     if azure_endpoint:
+        if not api_key:
+            raise RuntimeError("Missing Azure API key. Set AZURE_OPENAI_API_KEY or scorer api_key_env.")
         if not azure_api_version:
             raise RuntimeError("使用 Azure OpenAI 需在配置中指定 azure_api_version")
         return AzureOpenAI(api_key=api_key, azure_endpoint=azure_endpoint, api_version=azure_api_version)
-    if api_base:
-        return OpenAI(api_key=api_key, base_url=api_base)
+    if not api_key:
+        raise RuntimeError(f"环境变量 {api_key_env} 未设置，无法调用 OpenAI/Azure API")
+    if api_base_resolved:
+        return OpenAI(api_key=api_key, base_url=api_base_resolved)
     return OpenAI(api_key=api_key)
 
 

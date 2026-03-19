@@ -1,0 +1,2 @@
+"""BFF service package root."""
+

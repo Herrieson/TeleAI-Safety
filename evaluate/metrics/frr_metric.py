@@ -5,7 +5,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 
 from metrics.base_metric import Metric, MetricState, MetricUpdate
 
@@ -177,11 +177,22 @@ class FRRMetric(Metric):
         )
         return summary
 
-    def _build_client(self) -> AzureOpenAI:
-        api_key = os.environ.get(self.api_key_env)
-        endpoint = os.environ.get(self.azure_endpoint_env)
+    def _build_client(self):
+        openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        openai_base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
+        if openai_api_key:
+            if openai_base_url:
+                return OpenAI(api_key=openai_api_key, base_url=openai_base_url)
+            return OpenAI(api_key=openai_api_key)
+
+        api_key = os.environ.get(self.api_key_env, "").strip()
+        endpoint = os.environ.get(self.azure_endpoint_env, "").strip()
         if not api_key or not endpoint:
-            raise ValueError("Missing Azure OpenAI credentials for FRR LLM judge.")
+            raise ValueError(
+                "Missing credentials for FRR LLM judge. "
+                "Set OPENAI_API_KEY (and optional OPENAI_BASE_URL), "
+                "or set AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT."
+            )
         return AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,

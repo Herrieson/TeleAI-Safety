@@ -1,0 +1,16 @@
+datasets:
+  - key: teleai_samples_500_500
+    name: TeleAI Samples 500/500
+    path: data/txt/teleai_samples_500_500.jsonl
+    description: Default text benchmark set with balanced risky and safe samples.
+
+  - key: teleai_samples_500_500_interleaved
+    name: TeleAI Samples Interleaved
+    path: data/txt/teleai_samples_500_500_interleaved.jsonl
+    description: Interleaved variant for mixed-order testing.
+
+  - key: questions_with_category
+    name: Questions With Category
+    path: attack/questions_with_category.json
+    description: Category-tagged set, suitable for methods like DRA/DeepInception.
+

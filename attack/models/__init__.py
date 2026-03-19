@@ -37,6 +37,21 @@ def load_model(model_type=None, model_name=None, model_path=None, config=None):
             api_key=grok_api_key,
         )
 
+    # ✅ OpenAI model with target-dedicated credentials (for quick mode credential split)
+    if "openai_target" in model_type_lower:
+        print("Loading OpenAIModel (target credentials)...")
+        target_base_url = getattr(config, "azure_url", None) or getattr(config, "base_url", None)
+        target_api_key = getattr(config, "azure_key", None) or getattr(config, "api_key", None)
+        if not target_base_url:
+            raise ValueError("Missing target OpenAI endpoint. Set `azure_url` (or `base_url`).")
+        if not target_api_key:
+            raise ValueError("Missing target OpenAI API key. Set `azure_key` (or `api_key`).")
+        return OpenAIModel(
+            model_name=model_name,
+            base_url=target_base_url,
+            api_key=target_api_key,
+        )
+
     # ✅ AzureOpenAI model
     if 'azure' in model_type_lower:
         print("Loading AzureModel...")
