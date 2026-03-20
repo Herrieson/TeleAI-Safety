@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArtifactTable } from "@/components/runs/ArtifactTable";
@@ -33,15 +33,29 @@ export default function RunDetailPage() {
   const [artifacts, setArtifacts] = useState<RunArtifactsResponse | null>(null);
   const [metrics, setMetrics] = useState<RunMetricsSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [runRefreshing, setRunRefreshing] = useState(false);
+  const [logsRefreshing, setLogsRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [startingEvaluate, setStartingEvaluate] = useState(false);
   const [evaluateProfile, setEvaluateProfile] = useState("full");
+  const [isPageVisible, setIsPageVisible] = useState(true);
+  const runLoadingRef = useRef(false);
+  const logsLoadingRef = useRef(false);
 
   const isRunning = run?.status === "running" || run?.status === "pending";
   const canEvaluateFromRun =
     !!run && run.status === "succeeded" && run.mode !== "eval_only" && !!run.result_manifest?.trim();
 
-  const loadRun = useCallback(async () => {
+  const loadRun = useCallback(async (background = false) => {
+    if (runLoadingRef.current) {
+      return;
+    }
+    runLoadingRef.current = true;
+    if (background) {
+      setRunRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     try {
       const row = await getRun(runId);
       setRun(row);
@@ -57,10 +71,19 @@ export default function RunDetailPage() {
       setError(message);
     } finally {
       setLoading(false);
+      setRunRefreshing(false);
+      runLoadingRef.current = false;
     }
   }, [runId]);
 
-  const loadLogs = useCallback(async () => {
+  const loadLogs = useCallback(async (background = false) => {
+    if (logsLoadingRef.current) {
+      return;
+    }
+    logsLoadingRef.current = true;
+    if (background) {
+      setLogsRefreshing(true);
+    }
     try {
       const row = await getRunLogs(runId, selectedStage, tailLines);
       setLogs(row);
@@ -68,6 +91,9 @@ export default function RunDetailPage() {
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err);
       setError(message);
+    } finally {
+      setLogsRefreshing(false);
+      logsLoadingRef.current = false;
     }
   }, [runId, selectedStage, tailLines]);
 
@@ -94,23 +120,38 @@ export default function RunDetailPage() {
   }, [runId]);
 
   useEffect(() => {
-    void loadRun();
-    const timer = setInterval(() => {
-      void loadRun();
-    }, 3000);
-    return () => clearInterval(timer);
+    void loadRun(false);
   }, [loadRun]);
 
   useEffect(() => {
-    if (tab !== "logs") {
+    function onVisibilityChange() {
+      setIsPageVisible(document.visibilityState === "visible");
+    }
+    onVisibilityChange();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    if (!isPageVisible || !isRunning) {
       return;
     }
-    void loadLogs();
     const timer = setInterval(() => {
-      void loadLogs();
+      void loadRun(true);
     }, 3000);
     return () => clearInterval(timer);
-  }, [tab, loadLogs]);
+  }, [isPageVisible, isRunning, loadRun]);
+
+  useEffect(() => {
+    if (tab !== "logs" || !isPageVisible) {
+      return;
+    }
+    void loadLogs(false);
+    const timer = setInterval(() => {
+      void loadLogs(true);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [isPageVisible, tab, loadLogs]);
 
   useEffect(() => {
     if (tab === "artifacts") {
@@ -122,6 +163,13 @@ export default function RunDetailPage() {
   }, [tab, loadArtifacts, loadMetrics]);
 
   const stageOptions = useMemo(() => run?.stages.map((stage) => stage.stage) || [], [run]);
+  const stageStats = useMemo(() => {
+    const rows = run?.stages || [];
+    const total = rows.length;
+    const done = rows.filter((item) => item.status === "succeeded").length;
+    const failed = rows.filter((item) => item.status === "failed").length;
+    return { total, done, failed };
+  }, [run]);
 
   async function handleCancel() {
     if (!run) {
@@ -129,7 +177,7 @@ export default function RunDetailPage() {
     }
     try {
       await cancelRun(run.run_id);
-      await loadRun();
+      await loadRun(true);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err);
       setError(message);
@@ -185,7 +233,7 @@ export default function RunDetailPage() {
   }
 
   return (
-    <section className="space-y-4">
+    <section aria-busy={loading || runRefreshing || logsRefreshing} className="space-y-4">
       <div className="panel p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -193,11 +241,11 @@ export default function RunDetailPage() {
             <h2 className="title-gradient font-headline text-2xl font-semibold">{run.name}</h2>
             <p className="mono mt-2 text-xs text-slate-600">{run.run_id}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <RunStatusBadge status={run.status} />
             {isRunning ? (
-              <button className="btn" onClick={() => void handleCancel()} type="button">
-                Cancel
+              <button className={runRefreshing ? "btn btn-busy" : "btn"} disabled={runRefreshing} onClick={() => void handleCancel()} type="button">
+                {runRefreshing ? "Canceling..." : "Cancel"}
               </button>
             ) : null}
             {canEvaluateFromRun ? (
@@ -220,8 +268,25 @@ export default function RunDetailPage() {
             </Link>
           </div>
         </div>
-        {run.error ? <p className="mb-3 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{run.error}</p> : null}
-        {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-slate-600">Auto refresh every 3s.</p>
+          {runRefreshing ? (
+            <p className="inline-flex items-center gap-2 text-xs text-emerald-700">
+              <span className="refresh-dot" />
+              syncing run status...
+            </p>
+          ) : null}
+        </div>
+        {run.error ? (
+          <p aria-live="assertive" className="notice notice-error mb-3" role="alert">
+            {run.error}
+          </p>
+        ) : null}
+        {error ? (
+          <p aria-live="assertive" className="notice notice-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {(["overview", "logs", "artifacts", "metrics"] as DetailTab[]).map((item) => (
             <button
@@ -238,6 +303,23 @@ export default function RunDetailPage() {
 
       {tab === "overview" ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <article className="panel p-4 lg:col-span-3">
+            <p className="label mb-2">Stage Snapshot</p>
+            <div className="stat-grid">
+              <article className="stat-card">
+                <p className="label mb-2">Total Stages</p>
+                <p className="stat-value">{stageStats.total}</p>
+              </article>
+              <article className="stat-card">
+                <p className="label mb-2">Completed</p>
+                <p className="stat-value">{stageStats.done}</p>
+              </article>
+              <article className="stat-card">
+                <p className="label mb-2">Failed</p>
+                <p className="stat-value">{stageStats.failed}</p>
+              </article>
+            </div>
+          </article>
           <article className="panel p-4 lg:col-span-1">
             <p className="label mb-2">Config</p>
             <dl className="space-y-2 text-sm">
@@ -322,12 +404,19 @@ export default function RunDetailPage() {
               value={tailLines}
             >
               <option value={200}>200</option>
+              <option value={400}>400</option>
               <option value={500}>500</option>
               <option value={1000}>1000</option>
             </select>
-            <button className="btn" onClick={() => void loadLogs()} type="button">
-              Refresh
+            <button className={logsRefreshing ? "btn btn-busy" : "btn"} disabled={logsRefreshing} onClick={() => void loadLogs(true)} type="button">
+              {logsRefreshing ? "Refreshing..." : "Refresh"}
             </button>
+            {logsRefreshing ? (
+              <p aria-live="polite" className="inline-flex items-center gap-2 text-xs text-emerald-700">
+                <span className="refresh-dot" />
+                syncing logs...
+              </p>
+            ) : null}
           </div>
           <p className="label mb-2">Log Path</p>
           <p className="mono mb-3 text-xs text-slate-700">{logs?.log_path || "-"}</p>

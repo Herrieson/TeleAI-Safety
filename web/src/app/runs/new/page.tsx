@@ -64,6 +64,7 @@ export default function NewRunPage() {
   const router = useRouter();
   const [payload, setPayload] = useState<RunCreatePayload>(defaultPayload);
   const [submitting, setSubmitting] = useState(false);
+  const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState("");
   const [methodOptions, setMethodOptions] = useState<string[]>(fallbackMethodOptions);
   const [datasetOptions, setDatasetOptions] = useState<QuickAttackDataset[]>([
@@ -86,10 +87,24 @@ export default function NewRunPage() {
   const [benchmarkManualPathEnabled, setBenchmarkManualPathEnabled] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     void (async () => {
-      try {
-        const data = await getQuickAttackMethods();
-        const methods = (data.methods || []).filter((item) => !!item).sort();
+      setInitializing(true);
+      const [methodsResult, datasetsResult, runsResult, attackConfigResult, benchmarkConfigResult] =
+        await Promise.allSettled([
+          getQuickAttackMethods(),
+          getQuickAttackDatasets(),
+          getRuns(),
+          getAttackConfigOptions(),
+          getBenchmarkConfigOptions()
+        ]);
+
+      if (!alive) {
+        return;
+      }
+
+      if (methodsResult.status === "fulfilled") {
+        const methods = (methodsResult.value.methods || []).filter((item) => !!item).sort();
         if (methods.length > 0) {
           setMethodOptions(methods);
           setPayload((prev) => ({
@@ -103,13 +118,10 @@ export default function NewRunPage() {
             })()
           }));
         }
-      } catch {
-        // keep fallback method options
       }
 
-      try {
-        const data = await getQuickAttackDatasets();
-        const datasets = data.datasets || [];
+      if (datasetsResult.status === "fulfilled") {
+        const datasets = datasetsResult.value.datasets || [];
         if (datasets.length > 0) {
           setDatasetOptions(datasets);
           setPayload((prev) => ({
@@ -119,40 +131,35 @@ export default function NewRunPage() {
               : datasets[0].key
           }));
         }
-      } catch {
-        // keep fallback dataset options
       }
 
-      try {
-        const runs = await getRuns();
-        const options = runs.filter((run) => !!run.result_manifest?.trim());
+      if (runsResult.status === "fulfilled") {
+        const options = runsResult.value.filter((run) => !!run.result_manifest?.trim());
         setManifestSourceRuns(options);
-      } catch {
-        // source run selector remains empty
       }
 
-      try {
-        const data = await getAttackConfigOptions();
-        const items = [...(data.directories || []), ...(data.yaml_files || [])]
+      if (attackConfigResult.status === "fulfilled") {
+        const items = [...(attackConfigResult.value.directories || []), ...(attackConfigResult.value.yaml_files || [])]
           .filter((item) => !!item)
           .sort();
         if (items.length > 0) {
           setAttackConfigPathOptions(items);
         }
-      } catch {
-        // keep fallback options
       }
 
-      try {
-        const data = await getBenchmarkConfigOptions();
-        const items = (data.yaml_files || []).filter((item) => !!item).sort();
+      if (benchmarkConfigResult.status === "fulfilled") {
+        const items = (benchmarkConfigResult.value.yaml_files || []).filter((item) => !!item).sort();
         if (items.length > 0) {
           setBenchmarkConfigOptions(items);
         }
-      } catch {
-        // keep fallback options
       }
+
+      setInitializing(false);
     })();
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const isAttackMode = payload.mode === "attack_only" || payload.mode === "full_pipeline";
@@ -314,11 +321,17 @@ export default function NewRunPage() {
           Choose mode and inputs. Attack/evaluate outputs are isolated by run id on backend.
         </p>
       </div>
+      {initializing ? (
+        <p aria-live="polite" className="notice mb-4 inline-flex items-center gap-2 text-slate-700">
+          <span className="refresh-dot" />
+          loading latest config options...
+        </p>
+      ) : null}
 
-      <form onSubmit={onSubmit}>
+      <form aria-busy={submitting || initializing} onSubmit={onSubmit}>
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
           <div className="space-y-5 xl:col-span-8">
-            <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+            <article className="section-card">
               <p className="label mb-3">Basic Setup</p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label>
@@ -359,7 +372,7 @@ export default function NewRunPage() {
             </article>
 
             {isAttackMode ? (
-              <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+              <article className="section-card">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <p className="label">Attack Settings</p>
                   <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -417,7 +430,7 @@ export default function NewRunPage() {
                       </label>
                     </div>
 
-                    <details className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                    <details className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
                         Target API Credentials {benchmarkWillRun ? "(required for benchmark)" : "(optional)"}
                       </summary>
@@ -454,7 +467,7 @@ export default function NewRunPage() {
                       </div>
                     </details>
 
-                    <details className="rounded-xl border border-slate-200 bg-slate-50/60 p-3" open={selectedCount === 0}>
+                    <details className="rounded-xl border border-slate-200 bg-slate-50/70 p-3" open={selectedCount === 0}>
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
                         Attack Methods ({selectedCount} selected / {methodOptions.length})
                       </summary>
@@ -475,16 +488,12 @@ export default function NewRunPage() {
                             Clear
                           </button>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                        <div className="method-grid">
                           {methodOptions.map((method) => {
                             const selected = payload.quick_attack_methods.includes(method);
                             return (
                               <label
-                                className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium ${
-                                  selected
-                                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                                    : "border-slate-300 bg-white text-slate-700"
-                                }`}
+                                className={selected ? "method-chip method-chip-active" : "method-chip"}
                                 key={method}
                               >
                                 <input
@@ -525,7 +534,7 @@ export default function NewRunPage() {
             ) : null}
 
             {isBenchmarkMode ? (
-              <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+              <article className="section-card">
                 <p className="label mb-3">Benchmark Settings</p>
                 <div className="space-y-3">
                   {showBenchmarkManualPath ? (
@@ -618,7 +627,7 @@ export default function NewRunPage() {
             ) : null}
 
             {isEvaluateMode ? (
-              <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+              <article className="section-card">
                 <p className="label mb-3">Evaluate Settings</p>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <label>
@@ -685,10 +694,14 @@ export default function NewRunPage() {
               </article>
             ) : null}
 
-            {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
+            {error ? (
+              <p aria-live="assertive" className="notice notice-error" role="alert">
+                {error}
+              </p>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2">
-              <button className="btn btn-primary" disabled={submitting} type="submit">
-                {submitting ? "Submitting..." : modeSubmitLabel(payload.mode)}
+              <button className={submitting ? "btn btn-primary btn-busy" : "btn btn-primary"} disabled={submitting || initializing} type="submit">
+                {submitting ? "Submitting..." : initializing ? "Preparing..." : modeSubmitLabel(payload.mode)}
               </button>
               <button
                 className="btn"
@@ -735,13 +748,15 @@ export default function NewRunPage() {
             <article className="stat-card">
               <p className="label mb-2">Checklist</p>
               {previewWarnings.length ? (
-                <ul className="space-y-1 text-sm text-amber-800">
-                  {previewWarnings.map((item) => (
-                    <li key={item}>- {item}</li>
-                  ))}
-                </ul>
+                <div className="notice notice-warn">
+                  <ul className="space-y-1 text-sm">
+                    {previewWarnings.map((item) => (
+                      <li key={item}>- {item}</li>
+                    ))}
+                  </ul>
+                </div>
               ) : (
-                <p className="text-sm text-emerald-700">Form looks good. Ready to start.</p>
+                <p className="notice notice-good text-sm">Form looks good. Ready to start.</p>
               )}
               <p className="mt-3 text-xs text-slate-600">
                 Artifacts and intermediate outputs are isolated by run id, avoiding cross-run pollution.

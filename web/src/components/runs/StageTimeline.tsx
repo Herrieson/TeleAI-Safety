@@ -6,17 +6,17 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
     return <p className="text-sm text-slate-600">No stage records.</p>;
   }
   return (
-    <ul className="space-y-3">
-      {stages.map((stage) => (
-        <li
-          className="rounded-2xl border border-[#d7e5f2] bg-[linear-gradient(150deg,rgba(255,255,255,0.95),rgba(241,248,255,0.9))] px-4 py-3 shadow-[0_8px_18px_rgba(12,46,79,0.08)]"
-          key={`${stage.stage}-${stage.updated_at}-${stage.status}`}
-        >
-          <div className="mb-2 flex items-center justify-between">
-            <p className="font-headline text-base font-semibold capitalize">{stage.stage}</p>
+    <ul className="stage-list">
+      {stages.map((stage, index) => (
+        <li className="stage-item" key={`${stage.stage}-${stage.updated_at}-${stage.status}`}>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <p className="label mb-1">Stage {index + 1}</p>
+              <p className="font-headline text-base font-semibold capitalize">{stage.stage}</p>
+            </div>
             <RunStatusBadge status={stage.status} />
           </div>
-          <div className="grid grid-cols-1 gap-1 text-sm text-slate-700 md:grid-cols-2">
+          <div className="timeline-meta">
             <p>
               <span className="label mr-2">Start</span>
               {stage.started_at || "-"}
@@ -34,7 +34,12 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
               <span className="mono text-xs">{stage.log_path || "-"}</span>
             </p>
           </div>
-          {stage.error ? <p className="mt-2 text-sm text-rose-700">{stage.error}</p> : null}
+          {stage.command ? (
+            <p className="mt-2 truncate rounded-lg border border-slate-200/90 bg-white/70 px-2 py-1.5 mono text-[11px] text-slate-700">
+              {stage.command}
+            </p>
+          ) : null}
+          {stage.error ? <p className="notice notice-error mt-2">{stage.error}</p> : null}
         </li>
       ))}
     </ul>

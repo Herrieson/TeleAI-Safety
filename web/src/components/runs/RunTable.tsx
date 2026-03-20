@@ -6,15 +6,26 @@ type RunTableProps = {
   runs: Run[];
   onCancel: (runId: string) => Promise<void>;
   onDelete: (runId: string) => Promise<void>;
+  actionRunId?: string;
+  actionKind?: "cancel" | "delete" | null;
+  emptyMessage?: string;
 };
 
 function summarizeStages(run: Run) {
   return run.stages.map((stage) => `${stage.stage}:${stage.status}`).join(" | ");
 }
 
-export function RunTable({ runs, onCancel, onDelete }: RunTableProps) {
+function renderUpdatedAt(raw: string): string {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return raw;
+  }
+  return date.toLocaleString();
+}
+
+export function RunTable({ runs, onCancel, onDelete, actionRunId, actionKind, emptyMessage }: RunTableProps) {
   if (!runs.length) {
-    return <p className="p-4 text-sm text-slate-600">No runs yet.</p>;
+    return <p className="notice p-4 text-sm text-slate-600">{emptyMessage || "No runs yet."}</p>;
   }
   return (
     <div className="data-table-wrap">
@@ -44,7 +55,7 @@ export function RunTable({ runs, onCancel, onDelete }: RunTableProps) {
                 <p className="mono text-xs text-slate-700">{summarizeStages(run) || "-"}</p>
               </td>
               <td>
-                <p className="text-slate-700">{run.updated_at}</p>
+                <p className="text-slate-700">{renderUpdatedAt(run.updated_at)}</p>
               </td>
               <td>
                 <div className="flex items-center gap-2">
@@ -52,12 +63,22 @@ export function RunTable({ runs, onCancel, onDelete }: RunTableProps) {
                     Detail
                   </Link>
                   {(run.status === "pending" || run.status === "running") && (
-                    <button className="btn" onClick={() => onCancel(run.run_id)} type="button">
-                      Cancel
+                    <button
+                      className={actionRunId === run.run_id && actionKind === "cancel" ? "btn btn-busy" : "btn"}
+                      disabled={actionRunId === run.run_id}
+                      onClick={() => void onCancel(run.run_id)}
+                      type="button"
+                    >
+                      {actionRunId === run.run_id && actionKind === "cancel" ? "Canceling..." : "Cancel"}
                     </button>
                   )}
-                  <button className="btn" onClick={() => onDelete(run.run_id)} type="button">
-                    Delete
+                  <button
+                    className={actionRunId === run.run_id && actionKind === "delete" ? "btn btn-busy" : "btn"}
+                    disabled={actionRunId === run.run_id}
+                    onClick={() => void onDelete(run.run_id)}
+                    type="button"
+                  >
+                    {actionRunId === run.run_id && actionKind === "delete" ? "Deleting..." : "Delete"}
                   </button>
                 </div>
               </td>

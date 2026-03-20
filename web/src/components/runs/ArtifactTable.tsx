@@ -1,8 +1,25 @@
 import type { Artifact } from "@/lib/types";
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "-";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
 export function ArtifactTable({ artifacts }: { artifacts: Artifact[] }) {
   if (!artifacts.length) {
-    return <p className="text-sm text-slate-600">No artifacts recorded yet.</p>;
+    return <p className="notice text-slate-600">No artifacts recorded yet.</p>;
   }
   return (
     <div className="data-table-wrap">
@@ -24,7 +41,7 @@ export function ArtifactTable({ artifacts }: { artifacts: Artifact[] }) {
               <td>
                 <span className="mono text-xs text-slate-700">{item.path}</span>
               </td>
-              <td className="text-slate-700">{item.size_bytes}</td>
+              <td className="text-slate-700">{formatBytes(item.size_bytes)}</td>
               <td className="text-slate-700">{item.created_at}</td>
             </tr>
           ))}
