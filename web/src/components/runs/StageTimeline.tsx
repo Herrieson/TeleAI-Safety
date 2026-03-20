@@ -9,7 +9,7 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
     <ul className="space-y-3">
       {stages.map((stage) => (
         <li
-          className="rounded-xl border border-slate-200 bg-white px-4 py-3"
+          className="rounded-2xl border border-[#d7e5f2] bg-[linear-gradient(150deg,rgba(255,255,255,0.95),rgba(241,248,255,0.9))] px-4 py-3 shadow-[0_8px_18px_rgba(12,46,79,0.08)]"
           key={`${stage.stage}-${stage.updated_at}-${stage.status}`}
         >
           <div className="mb-2 flex items-center justify-between">
@@ -40,4 +40,3 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
     </ul>
   );
 }
-

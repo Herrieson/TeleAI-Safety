@@ -170,6 +170,50 @@ export default function NewRunPage() {
   );
   const benchmarkOptionsAvailable = benchmarkConfigOptions.length > 0;
   const showBenchmarkManualPath = benchmarkManualPathEnabled || !benchmarkOptionsAvailable;
+  const benchmarkWillRun =
+    payload.mode === "benchmark_only" || (payload.mode === "full_pipeline" && !!payload.benchmark_config_path.trim());
+  const benchmarkNeedsStandaloneTarget = isBenchmarkMode && !isAttackMode;
+  const stagePreview = useMemo(() => {
+    const rows: string[] = [];
+    if (isAttackMode) {
+      rows.push("attack");
+    }
+    if (benchmarkWillRun) {
+      rows.push("benchmark");
+    } else if (isBenchmarkMode) {
+      rows.push("benchmark (skipped)");
+    }
+    if (isEvaluateMode) {
+      rows.push("evaluate");
+    }
+    return rows;
+  }, [benchmarkWillRun, isAttackMode, isBenchmarkMode, isEvaluateMode]);
+  const previewWarnings = useMemo(() => {
+    const hints: string[] = [];
+    if (isAttackMode && payload.quick_attack_enabled && !payload.quick_attack_methods.length) {
+      hints.push("Select at least one attack method.");
+    }
+    if (benchmarkWillRun && (!payload.quick_openai_base_url.trim() || !payload.quick_openai_api_key.trim())) {
+      hints.push("Benchmark needs target model base_url and api_key.");
+    }
+    if (
+      payload.mode === "eval_only" &&
+      !(selectedManifestSourceRun?.result_manifest?.trim() || payload.result_manifest.trim())
+    ) {
+      hints.push("Eval-only mode requires a manifest.");
+    }
+    return hints;
+  }, [
+    benchmarkWillRun,
+    isAttackMode,
+    payload.mode,
+    payload.quick_attack_enabled,
+    payload.quick_attack_methods,
+    payload.quick_openai_api_key,
+    payload.quick_openai_base_url,
+    payload.result_manifest,
+    selectedManifestSourceRun
+  ]);
 
   function toggleMethod(method: string) {
     setPayload((prev) => {
@@ -215,6 +259,17 @@ export default function NewRunPage() {
       return;
     }
 
+    if (benchmarkWillRun) {
+      if (!payload.quick_target_model_name.trim()) {
+        setError("Target model name is required when benchmark stage is enabled.");
+        return;
+      }
+      if (!payload.quick_openai_base_url.trim() || !payload.quick_openai_api_key.trim()) {
+        setError("Target model base_url and api_key are required when benchmark stage is enabled.");
+        return;
+      }
+    }
+
     if (payload.mode === "eval_only" && !effectiveResultManifest.trim()) {
       setError("Result manifest is required in eval_only mode.");
       return;
@@ -254,395 +309,445 @@ export default function NewRunPage() {
     <section className="panel p-6">
       <div className="mb-5">
         <p className="label">Runs Console</p>
-        <h2 className="font-headline text-2xl font-semibold">New Run</h2>
+        <h2 className="title-gradient font-headline text-2xl font-semibold">New Run</h2>
         <p className="mt-2 text-sm text-slate-600">
           Choose mode and inputs. Attack/evaluate outputs are isolated by run id on backend.
         </p>
       </div>
 
-      <form className="space-y-5" onSubmit={onSubmit}>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label>
-            <span className="label mb-1 block">Run Name (optional)</span>
-            <input
-              className="input"
-              onChange={(event) => setPayload((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="e.g. gpt4o-mini-nightly"
-              value={payload.name}
-            />
-          </label>
+      <form onSubmit={onSubmit}>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+          <div className="space-y-5 xl:col-span-8">
+            <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+              <p className="label mb-3">Basic Setup</p>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label>
+                  <span className="label mb-1 block">Run Name (optional)</span>
+                  <input
+                    className="input"
+                    onChange={(event) => setPayload((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="e.g. gpt4o-mini-nightly"
+                    value={payload.name}
+                  />
+                </label>
+                <label>
+                  <span className="label mb-1 block">Mode</span>
+                  <select
+                    className="select"
+                    onChange={(event) => {
+                      const nextMode = event.target.value as RunMode;
+                      setPayload((prev) => ({
+                        ...prev,
+                        mode: nextMode,
+                        quick_attack_enabled:
+                          nextMode === "attack_only" || nextMode === "full_pipeline" ? prev.quick_attack_enabled : false
+                      }));
+                      if (nextMode !== "eval_only") {
+                        setManifestSourceRunId("");
+                      }
+                    }}
+                    value={payload.mode}
+                  >
+                    {runModeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </article>
 
-          <label>
-            <span className="label mb-1 block">Mode</span>
-            <select
-              className="select"
-              onChange={(event) => {
-                const nextMode = event.target.value as RunMode;
-                setPayload((prev) => ({
-                  ...prev,
-                  mode: nextMode,
-                  quick_attack_enabled:
-                    nextMode === "attack_only" || nextMode === "full_pipeline" ? prev.quick_attack_enabled : false
-                }));
-                if (nextMode !== "eval_only") {
-                  setManifestSourceRunId("");
-                }
-              }}
-              value={payload.mode}
-            >
-              {runModeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {isAttackMode ? (
-          <article className="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="label">Attack Settings</p>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={payload.quick_attack_enabled}
-                  onChange={(event) =>
-                    setPayload((prev) => ({
-                      ...prev,
-                      quick_attack_enabled: event.target.checked,
-                      attack_config_dir: event.target.checked ? "__AUTO__" : "configs/gpt-5.4"
-                    }))
-                  }
-                  type="checkbox"
-                />
-                Quick Attack
-              </label>
-            </div>
-
-            {payload.quick_attack_enabled ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <label>
-                    <span className="label mb-1 block">Target Model Name</span>
+            {isAttackMode ? (
+              <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="label">Attack Settings</p>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input
-                      className="input"
+                      checked={payload.quick_attack_enabled}
                       onChange={(event) =>
                         setPayload((prev) => ({
                           ...prev,
-                          quick_target_model_name: event.target.value
+                          quick_attack_enabled: event.target.checked,
+                          attack_config_dir: event.target.checked ? "__AUTO__" : "configs/gpt-5.4"
                         }))
                       }
-                      placeholder="gpt-4o-mini"
-                      value={payload.quick_target_model_name}
+                      type="checkbox"
                     />
-                  </label>
-
-                  <label>
-                    <span className="label mb-1 block">Dataset</span>
-                    <select
-                      className="select"
-                      onChange={(event) =>
-                        setPayload((prev) => ({
-                          ...prev,
-                          quick_dataset_key: event.target.value
-                        }))
-                      }
-                      value={payload.quick_dataset_key}
-                    >
-                      {datasetOptions.map((item) => (
-                        <option disabled={!item.exists} key={item.key} value={item.key}>
-                          {item.exists ? item.name : `${item.name} (unavailable)`}
-                        </option>
-                      ))}
-                    </select>
-                    {selectedDataset ? <p className="mt-1 text-xs text-slate-600">{selectedDataset.description}</p> : null}
+                    Quick Attack
                   </label>
                 </div>
 
-                <label>
-                  <span className="label mb-1 block">OpenAI Base URL (optional)</span>
-                  <input
-                    className="input mono"
-                    onChange={(event) =>
-                      setPayload((prev) => ({
-                        ...prev,
-                        quick_openai_base_url: event.target.value
-                      }))
-                    }
-                    placeholder="https://api.openai.com/v1"
-                    value={payload.quick_openai_base_url}
-                  />
-                </label>
-
-                <label>
-                  <span className="label mb-1 block">OpenAI API Key (optional)</span>
-                  <input
-                    className="input mono"
-                    onChange={(event) =>
-                      setPayload((prev) => ({
-                        ...prev,
-                        quick_openai_api_key: event.target.value
-                      }))
-                    }
-                    placeholder="sk-..."
-                    type="password"
-                    value={payload.quick_openai_api_key}
-                  />
-                </label>
-                <p className="text-xs text-slate-600">
-                  {isBenchmarkMode
-                    ? "If benchmark stage is enabled, target base_url/api_key should be provided for benchmark runtime patching."
-                    : "If backend internal LLM credentials are configured, these frontend fields can be left empty."}
-                </p>
-
-                <fieldset>
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="label">
-                      Attack Methods ({selectedCount} selected / {methodOptions.length} available)
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        className="btn"
-                        onClick={() => setPayload((prev) => ({ ...prev, quick_attack_methods: [...methodOptions] }))}
-                        type="button"
-                      >
-                        Select All
-                      </button>
-                      <button
-                        className="btn"
-                        onClick={() => setPayload((prev) => ({ ...prev, quick_attack_methods: [] }))}
-                        type="button"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-                    {methodOptions.map((method) => {
-                      const selected = payload.quick_attack_methods.includes(method);
-                      return (
-                        <label
-                          className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium ${
-                            selected
-                              ? "border-blue-500 bg-blue-50 text-blue-700"
-                              : "border-slate-300 bg-white text-slate-700"
-                          }`}
-                          key={method}
+                {payload.quick_attack_enabled ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <label>
+                        <span className="label mb-1 block">Target Model Name</span>
+                        <input
+                          className="input"
+                          onChange={(event) =>
+                            setPayload((prev) => ({
+                              ...prev,
+                              quick_target_model_name: event.target.value
+                            }))
+                          }
+                          placeholder="gpt-4o-mini"
+                          value={payload.quick_target_model_name}
+                        />
+                      </label>
+                      <label>
+                        <span className="label mb-1 block">Dataset</span>
+                        <select
+                          className="select"
+                          onChange={(event) =>
+                            setPayload((prev) => ({
+                              ...prev,
+                              quick_dataset_key: event.target.value
+                            }))
+                          }
+                          value={payload.quick_dataset_key}
                         >
+                          {datasetOptions.map((item) => (
+                            <option disabled={!item.exists} key={item.key} value={item.key}>
+                              {item.exists ? item.name : `${item.name} (unavailable)`}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedDataset ? <p className="mt-1 text-xs text-slate-600">{selectedDataset.description}</p> : null}
+                      </label>
+                    </div>
+
+                    <details className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                      <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                        Target API Credentials {benchmarkWillRun ? "(required for benchmark)" : "(optional)"}
+                      </summary>
+                      <div className="mt-3 space-y-3">
+                        <label>
+                          <span className="label mb-1 block">OpenAI Base URL</span>
                           <input
-                            checked={selected}
-                            className="sr-only"
-                            onChange={() => toggleMethod(method)}
-                            type="checkbox"
+                            className="input mono"
+                            onChange={(event) =>
+                              setPayload((prev) => ({
+                                ...prev,
+                                quick_openai_base_url: event.target.value
+                              }))
+                            }
+                            placeholder="https://api.openai.com/v1"
+                            value={payload.quick_openai_base_url}
                           />
-                          {method}
                         </label>
-                      );
-                    })}
+                        <label>
+                          <span className="label mb-1 block">OpenAI API Key</span>
+                          <input
+                            className="input mono"
+                            onChange={(event) =>
+                              setPayload((prev) => ({
+                                ...prev,
+                                quick_openai_api_key: event.target.value
+                              }))
+                            }
+                            placeholder="sk-..."
+                            type="password"
+                            value={payload.quick_openai_api_key}
+                          />
+                        </label>
+                      </div>
+                    </details>
+
+                    <details className="rounded-xl border border-slate-200 bg-slate-50/60 p-3" open={selectedCount === 0}>
+                      <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                        Attack Methods ({selectedCount} selected / {methodOptions.length})
+                      </summary>
+                      <div className="mt-3 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="btn"
+                            onClick={() => setPayload((prev) => ({ ...prev, quick_attack_methods: [...methodOptions] }))}
+                            type="button"
+                          >
+                            Select All
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => setPayload((prev) => ({ ...prev, quick_attack_methods: [] }))}
+                            type="button"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                          {methodOptions.map((method) => {
+                            const selected = payload.quick_attack_methods.includes(method);
+                            return (
+                              <label
+                                className={`cursor-pointer rounded-lg border px-3 py-2 text-center text-sm font-medium ${
+                                  selected
+                                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                                    : "border-slate-300 bg-white text-slate-700"
+                                }`}
+                                key={method}
+                              >
+                                <input
+                                  checked={selected}
+                                  className="sr-only"
+                                  onChange={() => toggleMethod(method)}
+                                  type="checkbox"
+                                />
+                                {method}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </details>
                   </div>
-                </fieldset>
-              </div>
-            ) : (
-              <label>
-                <span className="label mb-1 block">Attack Config Path (directory or .yaml)</span>
-                <input
-                  className="input mono"
-                  list="attackConfigPathOptions"
-                  onChange={(event) => setPayload((prev) => ({ ...prev, attack_config_dir: event.target.value }))}
-                  placeholder="configs/gpt-5.4"
-                  value={payload.attack_config_dir}
-                />
-                <datalist id="attackConfigPathOptions">
-                  {attackConfigPathOptions.map((item) => (
-                    <option key={item} value={item} />
-                  ))}
-                </datalist>
-                <p className="mt-1 text-xs text-slate-600">
-                  Use a directory to run all yaml files, or a single yaml path to run one method.
-                </p>
-              </label>
-            )}
-          </article>
-        ) : null}
-
-        {isBenchmarkMode ? (
-          <article className="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <p className="label mb-2">Benchmark Settings</p>
-            <div className="space-y-3">
-              {showBenchmarkManualPath ? (
-                <label>
-                  <span className="label mb-1 block">Benchmark Config Path</span>
-                  <input
-                    className="input mono"
-                    onChange={(event) => setPayload((prev) => ({ ...prev, benchmark_config_path: event.target.value }))}
-                    placeholder="benchmark/configs/example.yaml"
-                    value={payload.benchmark_config_path}
-                  />
-                </label>
-              ) : (
-                <label>
-                  <span className="label mb-1 block">Benchmark Config File</span>
-                  <select
-                    className="select mono"
-                    onChange={(event) => setPayload((prev) => ({ ...prev, benchmark_config_path: event.target.value }))}
-                    value={payload.benchmark_config_path}
-                  >
-                    <option value="">
-                      {payload.mode === "benchmark_only" ? "Select benchmark config file" : "Skip benchmark stage"}
-                    </option>
-                    {benchmarkConfigOptions.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={benchmarkManualPathEnabled}
-                  disabled={!benchmarkOptionsAvailable}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setBenchmarkManualPathEnabled(checked);
-                    if (!checked && !benchmarkConfigOptions.includes(payload.benchmark_config_path)) {
-                      setPayload((prev) => ({ ...prev, benchmark_config_path: "" }));
-                    }
-                  }}
-                  type="checkbox"
-                />
-                Manual benchmark config path
-              </label>
-              {!benchmarkOptionsAvailable ? (
-                <p className="text-xs text-amber-700">No benchmark config files found under benchmark/configs.</p>
-              ) : null}
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <label>
-                <span className="label mb-1 block">Target Model Name (for benchmark)</span>
-                <input
-                  className="input"
-                  onChange={(event) => setPayload((prev) => ({ ...prev, quick_target_model_name: event.target.value }))}
-                  placeholder="gpt-4o-mini"
-                  value={payload.quick_target_model_name}
-                />
-              </label>
-              <label>
-                <span className="label mb-1 block">Target OpenAI Base URL</span>
-                <input
-                  className="input mono"
-                  onChange={(event) => setPayload((prev) => ({ ...prev, quick_openai_base_url: event.target.value }))}
-                  placeholder="https://api.openai.com/v1"
-                  value={payload.quick_openai_base_url}
-                />
-              </label>
-            </div>
-            <label className="mt-4 block">
-              <span className="label mb-1 block">Target OpenAI API Key</span>
-              <input
-                className="input mono"
-                onChange={(event) => setPayload((prev) => ({ ...prev, quick_openai_api_key: event.target.value }))}
-                placeholder="sk-..."
-                type="password"
-                value={payload.quick_openai_api_key}
-              />
-            </label>
-            <p className="mt-2 text-xs text-slate-600">
-              Benchmark will auto-generate runtime config from template and bind top-level model to this target model.
-            </p>
-            {payload.mode === "full_pipeline" ? (
-              <p className="mt-2 text-xs text-slate-600">Leave empty to skip benchmark stage in full pipeline.</p>
+                ) : (
+                  <label>
+                    <span className="label mb-1 block">Attack Config Path (directory or .yaml)</span>
+                    <input
+                      className="input mono"
+                      list="attackConfigPathOptions"
+                      onChange={(event) => setPayload((prev) => ({ ...prev, attack_config_dir: event.target.value }))}
+                      placeholder="configs/gpt-5.4"
+                      value={payload.attack_config_dir}
+                    />
+                    <datalist id="attackConfigPathOptions">
+                      {attackConfigPathOptions.map((item) => (
+                        <option key={item} value={item} />
+                      ))}
+                    </datalist>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Use a directory to run all yaml files, or a single yaml path to run one method.
+                    </p>
+                  </label>
+                )}
+              </article>
             ) : null}
-          </article>
-        ) : null}
 
-        {isEvaluateMode ? (
-          <article className="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <p className="label mb-3">Evaluate Settings</p>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <label>
-                <span className="label mb-1 block">Eval Profile</span>
-                <select
-                  className="select"
-                  onChange={(event) => setPayload((prev) => ({ ...prev, eval_profile: event.target.value }))}
-                  value={payload.eval_profile}
-                >
-                  <option value="full">full</option>
-                  <option value="smoke">smoke</option>
-                </select>
-              </label>
+            {isBenchmarkMode ? (
+              <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+                <p className="label mb-3">Benchmark Settings</p>
+                <div className="space-y-3">
+                  {showBenchmarkManualPath ? (
+                    <label>
+                      <span className="label mb-1 block">Benchmark Config Path</span>
+                      <input
+                        className="input mono"
+                        onChange={(event) => setPayload((prev) => ({ ...prev, benchmark_config_path: event.target.value }))}
+                        placeholder="benchmark/configs/run/code/run_code_merged_model_only.yaml"
+                        value={payload.benchmark_config_path}
+                      />
+                    </label>
+                  ) : (
+                    <label>
+                      <span className="label mb-1 block">Benchmark Config File</span>
+                      <select
+                        className="select mono"
+                        onChange={(event) => setPayload((prev) => ({ ...prev, benchmark_config_path: event.target.value }))}
+                        value={payload.benchmark_config_path}
+                      >
+                        <option value="">
+                          {payload.mode === "benchmark_only" ? "Select benchmark config file" : "Skip benchmark stage"}
+                        </option>
+                        {benchmarkConfigOptions.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
 
-              <label>
-                <span className="label mb-1 block">Results Root</span>
-                <input
-                  className="input mono"
-                  onChange={(event) => setPayload((prev) => ({ ...prev, results_root: event.target.value }))}
-                  placeholder="data/attack_results"
-                  value={payload.results_root}
-                />
-              </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      checked={benchmarkManualPathEnabled}
+                      disabled={!benchmarkOptionsAvailable}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setBenchmarkManualPathEnabled(checked);
+                        if (!checked && !benchmarkConfigOptions.includes(payload.benchmark_config_path)) {
+                          setPayload((prev) => ({ ...prev, benchmark_config_path: "" }));
+                        }
+                      }}
+                      type="checkbox"
+                    />
+                    Manual benchmark config path
+                  </label>
+                </div>
+
+                {benchmarkNeedsStandaloneTarget ? (
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <label>
+                      <span className="label mb-1 block">Target Model Name</span>
+                      <input
+                        className="input"
+                        onChange={(event) => setPayload((prev) => ({ ...prev, quick_target_model_name: event.target.value }))}
+                        placeholder="gpt-4o-mini"
+                        value={payload.quick_target_model_name}
+                      />
+                    </label>
+                    <label>
+                      <span className="label mb-1 block">Target OpenAI Base URL</span>
+                      <input
+                        className="input mono"
+                        onChange={(event) => setPayload((prev) => ({ ...prev, quick_openai_base_url: event.target.value }))}
+                        placeholder="https://api.openai.com/v1"
+                        value={payload.quick_openai_base_url}
+                      />
+                    </label>
+                    <label className="md:col-span-2">
+                      <span className="label mb-1 block">Target OpenAI API Key</span>
+                      <input
+                        className="input mono"
+                        onChange={(event) => setPayload((prev) => ({ ...prev, quick_openai_api_key: event.target.value }))}
+                        placeholder="sk-..."
+                        type="password"
+                        value={payload.quick_openai_api_key}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-700">
+                    Benchmark will reuse target model settings from Attack section in full pipeline mode.
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-slate-600">
+                  Runtime config is generated from template; top-level benchmark model is auto-bound to target model.
+                </p>
+              </article>
+            ) : null}
+
+            {isEvaluateMode ? (
+              <article className="rounded-2xl border border-[#d7e5f2] bg-white/85 p-4 shadow-[0_8px_18px_rgba(12,46,79,0.08)]">
+                <p className="label mb-3">Evaluate Settings</p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <label>
+                    <span className="label mb-1 block">Eval Profile</span>
+                    <select
+                      className="select"
+                      onChange={(event) => setPayload((prev) => ({ ...prev, eval_profile: event.target.value }))}
+                      value={payload.eval_profile}
+                    >
+                      <option value="full">full</option>
+                      <option value="smoke">smoke</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span className="label mb-1 block">Results Root</span>
+                    <input
+                      className="input mono"
+                      onChange={(event) => setPayload((prev) => ({ ...prev, results_root: event.target.value }))}
+                      placeholder="data/attack_results"
+                      value={payload.results_root}
+                    />
+                  </label>
+                </div>
+
+                {payload.mode === "eval_only" ? (
+                  <div className="mt-4 space-y-4">
+                    <label>
+                      <span className="label mb-1 block">Use Existing Run Manifest (optional)</span>
+                      <select
+                        className="select"
+                        onChange={(event) => setManifestSourceRunId(event.target.value)}
+                        value={manifestSourceRunId}
+                      >
+                        <option value="">Manual manifest path</option>
+                        {manifestSourceRuns.map((item) => (
+                          <option key={item.run_id} value={item.run_id}>
+                            {item.name} ({item.run_id.slice(0, 8)})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span className="label mb-1 block">Result Manifest Path</span>
+                      <input
+                        className="input mono"
+                        disabled={!!selectedManifestSourceRun}
+                        onChange={(event) => setPayload((prev) => ({ ...prev, result_manifest: event.target.value }))}
+                        placeholder="data/attack_results/runs/<run_id>/manifests/<name>.txt"
+                        value={selectedManifestSourceRun ? selectedManifestSourceRun.result_manifest : payload.result_manifest}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <label className="mt-4 block">
+                    <span className="label mb-1 block">Result Manifest Path (optional)</span>
+                    <input
+                      className="input mono"
+                      onChange={(event) => setPayload((prev) => ({ ...prev, result_manifest: event.target.value }))}
+                      placeholder="Leave empty to use this run's attack outputs"
+                      value={payload.result_manifest}
+                    />
+                  </label>
+                )}
+              </article>
+            ) : null}
+
+            {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <button className="btn btn-primary" disabled={submitting} type="submit">
+                {submitting ? "Submitting..." : modeSubmitLabel(payload.mode)}
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  setPayload(defaultPayload);
+                  setManifestSourceRunId("");
+                  setBenchmarkManualPathEnabled(false);
+                  setError("");
+                }}
+                type="button"
+              >
+                Reset
+              </button>
             </div>
+          </div>
 
-            {payload.mode === "eval_only" ? (
-              <div className="mt-4 space-y-4">
-                <label>
-                  <span className="label mb-1 block">Use Existing Run Manifest (optional)</span>
-                  <select
-                    className="select"
-                    onChange={(event) => setManifestSourceRunId(event.target.value)}
-                    value={manifestSourceRunId}
-                  >
-                    <option value="">Manual manifest path</option>
-                    {manifestSourceRuns.map((item) => (
-                      <option key={item.run_id} value={item.run_id}>
-                        {item.name} ({item.run_id.slice(0, 8)})
-                      </option>
-                    ))}
-                  </select>
-                </label>
+          <aside className="space-y-4 xl:col-span-4 xl:sticky xl:top-6 xl:self-start">
+            <article className="stat-card">
+              <p className="label mb-2">Run Preview</p>
+              <dl className="space-y-2 text-sm text-slate-700">
+                <div>
+                  <dt className="label">Mode</dt>
+                  <dd>{payload.mode}</dd>
+                </div>
+                <div>
+                  <dt className="label">Stages</dt>
+                  <dd className="mono text-xs">{stagePreview.join(" -> ") || "-"}</dd>
+                </div>
+                <div>
+                  <dt className="label">Target Model</dt>
+                  <dd>{payload.quick_target_model_name || "-"}</dd>
+                </div>
+                <div>
+                  <dt className="label">Attack Methods</dt>
+                  <dd>{isAttackMode && payload.quick_attack_enabled ? selectedCount : 0}</dd>
+                </div>
+                <div>
+                  <dt className="label">Benchmark Config</dt>
+                  <dd className="mono text-xs">{payload.benchmark_config_path || "-"}</dd>
+                </div>
+              </dl>
+            </article>
 
-                <label>
-                  <span className="label mb-1 block">Result Manifest Path</span>
-                  <input
-                    className="input mono"
-                    disabled={!!selectedManifestSourceRun}
-                    onChange={(event) => setPayload((prev) => ({ ...prev, result_manifest: event.target.value }))}
-                    placeholder="data/attack_results/runs/<run_id>/manifests/<name>.txt"
-                    value={selectedManifestSourceRun ? selectedManifestSourceRun.result_manifest : payload.result_manifest}
-                  />
-                </label>
-              </div>
-            ) : (
-              <label className="mt-4 block">
-                <span className="label mb-1 block">Result Manifest Path (optional)</span>
-                <input
-                  className="input mono"
-                  onChange={(event) => setPayload((prev) => ({ ...prev, result_manifest: event.target.value }))}
-                  placeholder="Leave empty to use this run's attack outputs"
-                  value={payload.result_manifest}
-                />
-              </label>
-            )}
-          </article>
-        ) : null}
-
-        {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
-        <div className="flex items-center gap-2">
-          <button className="btn btn-primary" disabled={submitting} type="submit">
-            {submitting ? "Submitting..." : modeSubmitLabel(payload.mode)}
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              setPayload(defaultPayload);
-              setManifestSourceRunId("");
-              setBenchmarkManualPathEnabled(false);
-              setError("");
-            }}
-            type="button"
-          >
-            Reset
-          </button>
+            <article className="stat-card">
+              <p className="label mb-2">Checklist</p>
+              {previewWarnings.length ? (
+                <ul className="space-y-1 text-sm text-amber-800">
+                  {previewWarnings.map((item) => (
+                    <li key={item}>- {item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-emerald-700">Form looks good. Ready to start.</p>
+              )}
+              <p className="mt-3 text-xs text-slate-600">
+                Artifacts and intermediate outputs are isolated by run id, avoiding cross-run pollution.
+              </p>
+            </article>
+          </aside>
         </div>
       </form>
     </section>

@@ -41,6 +41,13 @@ export default function RunsPage() {
     return runs.filter((run) => run.status === statusFilter);
   }, [runs, statusFilter]);
 
+  const runStats = useMemo(() => {
+    const total = runs.length;
+    const active = runs.filter((run) => run.status === "running" || run.status === "pending").length;
+    const failures = runs.filter((run) => run.status === "failed").length;
+    return { total, active, failures };
+  }, [runs]);
+
   const handleCancel = useCallback(
     async (runId: string) => {
       try {
@@ -75,7 +82,7 @@ export default function RunsPage() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="label">Run Monitor</p>
-          <h2 className="font-headline text-2xl font-semibold">Pipeline Runs</h2>
+          <h2 className="title-gradient font-headline text-2xl font-semibold">Pipeline Runs</h2>
         </div>
         <div className="flex items-center gap-2">
           <label className="label" htmlFor="statusFilter">
@@ -98,6 +105,20 @@ export default function RunsPage() {
             Refresh
           </button>
         </div>
+      </div>
+      <div className="stat-grid mb-5">
+        <article className="stat-card">
+          <p className="label mb-2">Total Runs</p>
+          <p className="stat-value">{runStats.total}</p>
+        </article>
+        <article className="stat-card">
+          <p className="label mb-2">Active</p>
+          <p className="stat-value">{runStats.active}</p>
+        </article>
+        <article className="stat-card">
+          <p className="label mb-2">Failed</p>
+          <p className="stat-value">{runStats.failures}</p>
+        </article>
       </div>
       {error ? <p className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p> : null}
       {loading ? (

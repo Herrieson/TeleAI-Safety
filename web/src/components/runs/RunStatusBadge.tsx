@@ -11,8 +11,9 @@ const statusStyleMap: Record<RunStatus, string> = {
 export function RunStatusBadge({ status }: { status: RunStatus }) {
   return (
     <span
-      className={`inline-flex rounded-full border px-2.5 py-1 font-mono text-xs font-medium uppercase tracking-[0.06em] shadow-sm ${statusStyleMap[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs font-medium uppercase tracking-[0.06em] shadow-sm ${statusStyleMap[status]}`}
     >
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {status}
     </span>
   );

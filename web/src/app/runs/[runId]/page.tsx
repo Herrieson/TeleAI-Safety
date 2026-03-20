@@ -190,7 +190,7 @@ export default function RunDetailPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="label mb-1">Run Detail</p>
-            <h2 className="font-headline text-2xl font-semibold">{run.name}</h2>
+            <h2 className="title-gradient font-headline text-2xl font-semibold">{run.name}</h2>
             <p className="mono mt-2 text-xs text-slate-600">{run.run_id}</p>
           </div>
           <div className="flex items-center gap-2">

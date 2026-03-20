@@ -17,36 +17,36 @@ export function RunTable({ runs, onCancel, onDelete }: RunTableProps) {
     return <p className="p-4 text-sm text-slate-600">No runs yet.</p>;
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white/90">
-      <table className="w-full min-w-[920px] border-collapse bg-transparent">
+    <div className="data-table-wrap">
+      <table className="data-table min-w-[920px] bg-transparent">
         <thead>
-          <tr className="bg-slate-50/90 text-left text-xs uppercase tracking-[0.08em] text-slate-600">
-            <th className="border-b border-slate-200 px-4 py-3 font-semibold">Name</th>
-            <th className="border-b border-slate-200 px-4 py-3 font-semibold">Mode</th>
-            <th className="border-b border-slate-200 px-4 py-3 font-semibold">Status</th>
-            <th className="border-b border-slate-200 px-4 py-3 font-semibold">Stages</th>
-            <th className="border-b border-slate-200 px-4 py-3 font-semibold">Updated</th>
-            <th className="border-b border-slate-200 px-4 py-3 font-semibold">Actions</th>
+          <tr>
+            <th className="font-semibold">Name</th>
+            <th className="font-semibold">Mode</th>
+            <th className="font-semibold">Status</th>
+            <th className="font-semibold">Stages</th>
+            <th className="font-semibold">Updated</th>
+            <th className="font-semibold">Actions</th>
           </tr>
         </thead>
         <tbody>
           {runs.map((run) => (
-            <tr className="align-top text-sm transition-colors hover:bg-slate-50/70" key={run.run_id}>
-              <td className="border-b border-slate-100 px-4 py-3">
+            <tr className="align-top text-sm transition-colors" key={run.run_id}>
+              <td>
                 <p className="font-headline font-semibold text-slate-900">{run.name}</p>
                 <p className="mono mt-1 text-xs text-slate-500">{run.run_id}</p>
               </td>
-              <td className="border-b border-slate-100 px-4 py-3 text-slate-700">{run.mode}</td>
-              <td className="border-b border-slate-100 px-4 py-3">
+              <td className="text-slate-700">{run.mode}</td>
+              <td>
                 <RunStatusBadge status={run.status} />
               </td>
-              <td className="border-b border-slate-100 px-4 py-3">
+              <td>
                 <p className="mono text-xs text-slate-700">{summarizeStages(run) || "-"}</p>
               </td>
-              <td className="border-b border-slate-100 px-4 py-3">
+              <td>
                 <p className="text-slate-700">{run.updated_at}</p>
               </td>
-              <td className="border-b border-slate-100 px-4 py-3">
+              <td>
                 <div className="flex items-center gap-2">
                   <Link className="btn" href={`/runs/${run.run_id}`}>
                     Detail

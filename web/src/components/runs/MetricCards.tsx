@@ -16,21 +16,21 @@ export function MetricCards({ summary, emptyMessage }: MetricCardsProps) {
   }
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-      <article className="panel p-4">
+      <article className="stat-card">
         <p className="label mb-1">ASR Avg</p>
-        <p className="font-headline text-2xl font-semibold text-accent">{asNumber(summary.asr_avg)}</p>
+        <p className="font-headline text-2xl font-semibold text-[#0d65b3]">{asNumber(summary.asr_avg)}</p>
       </article>
-      <article className="panel p-4">
+      <article className="stat-card">
         <p className="label mb-1">ASR Effective Avg</p>
-        <p className="font-headline text-2xl font-semibold text-signal">
+        <p className="font-headline text-2xl font-semibold text-[#0b8f69]">
           {asNumber(summary.asr_effective_avg)}
         </p>
       </article>
-      <article className="panel p-4">
+      <article className="stat-card">
         <p className="label mb-1">FRR Avg</p>
-        <p className="font-headline text-2xl font-semibold text-warn">{asNumber(summary.frr_avg)}</p>
+        <p className="font-headline text-2xl font-semibold text-[#b36a20]">{asNumber(summary.frr_avg)}</p>
       </article>
-      <article className="panel p-4 md:col-span-3">
+      <article className="stat-card md:col-span-3">
         <p className="label mb-1">Scorers</p>
         <p className="mono text-sm text-slate-700">
           {Array.isArray(summary.scorers) ? summary.scorers.join(", ") : "-"}

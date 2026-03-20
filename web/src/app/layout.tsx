@@ -19,7 +19,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Image alt="TeleRT logo" className="h-10 w-10 rounded-md object-contain" priority src={telertLogo} />
               <div>
                 <p className="label mb-1">TeleRT</p>
-                <h1 className="font-headline text-2xl font-semibold md:text-3xl">Runs Console</h1>
+                <h1 className="title-gradient font-headline text-2xl font-semibold md:text-3xl">Runs Console</h1>
+                <p className="brand-subtitle">Red Team Pipeline Control Plane</p>
               </div>
             </div>
             <nav className="flex items-center gap-2 text-sm">
