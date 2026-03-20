@@ -320,6 +320,14 @@ export default function NewRunPage() {
         <p className="mt-2 text-sm text-slate-600">
           Choose mode and inputs. Attack/evaluate outputs are isolated by run id on backend.
         </p>
+        <div className="hud-strip mt-2">
+          <span className="hud-pill">Mission Builder</span>
+          <span className="hud-pill">Pipeline Composer</span>
+          <span className="hud-pill hud-pill-live">
+            <span className="refresh-dot" />
+            Ready
+          </span>
+        </div>
       </div>
       {initializing ? (
         <p aria-live="polite" className="notice mb-4 inline-flex items-center gap-2 text-slate-700">
@@ -330,7 +338,7 @@ export default function NewRunPage() {
 
       <form aria-busy={submitting || initializing} onSubmit={onSubmit}>
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-          <div className="space-y-5 xl:col-span-8">
+          <div className="space-y-5 xl:col-span-8 reveal-grid">
             <article className="section-card">
               <p className="label mb-3">Basic Setup</p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -430,7 +438,7 @@ export default function NewRunPage() {
                       </label>
                     </div>
 
-                    <details className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                    <details className="tech-subpanel p-3">
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
                         Target API Credentials {benchmarkWillRun ? "(required for benchmark)" : "(optional)"}
                       </summary>
@@ -467,7 +475,7 @@ export default function NewRunPage() {
                       </div>
                     </details>
 
-                    <details className="rounded-xl border border-slate-200 bg-slate-50/70 p-3" open={selectedCount === 0}>
+                    <details className="tech-subpanel p-3" open={selectedCount === 0}>
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
                         Attack Methods ({selectedCount} selected / {methodOptions.length})
                       </summary>
@@ -616,7 +624,7 @@ export default function NewRunPage() {
                     </label>
                   </div>
                 ) : (
-                  <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-700">
+                  <p className="tech-subpanel mt-4 p-3 text-sm text-slate-700">
                     Benchmark will reuse target model settings from Attack section in full pipeline mode.
                   </p>
                 )}
@@ -718,7 +726,7 @@ export default function NewRunPage() {
             </div>
           </div>
 
-          <aside className="space-y-4 xl:col-span-4 xl:sticky xl:top-6 xl:self-start">
+          <aside className="space-y-4 xl:col-span-4 xl:sticky xl:top-6 xl:self-start reveal-grid">
             <article className="stat-card">
               <p className="label mb-2">Run Preview</p>
               <dl className="space-y-2 text-sm text-slate-700">

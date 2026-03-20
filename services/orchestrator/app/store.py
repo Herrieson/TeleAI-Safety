@@ -1,18 +1,59 @@
+import json
 from datetime import datetime
+from pathlib import Path
 from threading import Lock
 from typing import Dict, List, Optional
 
+from .config import settings
 from .models import ArtifactRecord, RunRecord, StageStatus
 
 
 class InMemoryRunStore:
-    def __init__(self):
+    def __init__(self, snapshot_path: Optional[Path] = None):
         self._runs: Dict[str, RunRecord] = {}
         self._lock = Lock()
+        default_path = settings.run_log_root / "_state" / "runs_store.json"
+        self._snapshot_path = snapshot_path or default_path
+        self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        path = self._snapshot_path
+        if not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        rows = raw.get("runs") if isinstance(raw, dict) else None
+        if not isinstance(rows, list):
+            return
+
+        loaded: Dict[str, RunRecord] = {}
+        for item in rows:
+            try:
+                run = RunRecord.model_validate(item)
+            except Exception:
+                continue
+            loaded[run.run_id] = run
+        self._runs = loaded
+
+    def _persist_locked(self) -> None:
+        path = self._snapshot_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "saved_at": datetime.utcnow().isoformat(),
+            "runs": [run.model_dump(mode="json") for run in self._runs.values()],
+        }
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(path)
 
     def add(self, run: RunRecord) -> RunRecord:
         with self._lock:
             self._runs[run.run_id] = run
+            self._persist_locked()
             return run
 
     def get(self, run_id: str) -> Optional[RunRecord]:
@@ -36,6 +77,7 @@ class InMemoryRunStore:
             if status in ("succeeded", "failed", "canceled"):
                 run.ended_at = now
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def update_stage(
@@ -74,6 +116,7 @@ class InMemoryRunStore:
                 break
             run.updated_at = now
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def cancel_running_stages(self, run_id: str) -> Optional[RunRecord]:
@@ -91,6 +134,7 @@ class InMemoryRunStore:
                         stage.error = "canceled by user"
             run.updated_at = now
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def add_artifacts(self, run_id: str, artifacts: List[ArtifactRecord]) -> Optional[RunRecord]:
@@ -106,6 +150,7 @@ class InMemoryRunStore:
                 existing.add(artifact.path)
             run.updated_at = datetime.utcnow()
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def update_metric_summary(self, run_id: str, summary: dict) -> Optional[RunRecord]:
@@ -116,6 +161,7 @@ class InMemoryRunStore:
             run.metric_summary = summary
             run.updated_at = datetime.utcnow()
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def set_result_manifest(self, run_id: str, manifest_path: str) -> Optional[RunRecord]:
@@ -126,6 +172,7 @@ class InMemoryRunStore:
             run.result_manifest = manifest_path
             run.updated_at = datetime.utcnow()
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def update_attack_config_dir(self, run_id: str, attack_config_dir: str) -> Optional[RunRecord]:
@@ -136,6 +183,7 @@ class InMemoryRunStore:
             run.attack_config_dir = attack_config_dir
             run.updated_at = datetime.utcnow()
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def update_results_root(self, run_id: str, results_root: str) -> Optional[RunRecord]:
@@ -146,11 +194,14 @@ class InMemoryRunStore:
             run.results_root = results_root
             run.updated_at = datetime.utcnow()
             self._runs[run_id] = run
+            self._persist_locked()
             return run
 
     def delete(self, run_id: str) -> Optional[RunRecord]:
         with self._lock:
-            return self._runs.pop(run_id, None)
+            removed = self._runs.pop(run_id, None)
+            self._persist_locked()
+            return removed
 
 
 run_store = InMemoryRunStore()

@@ -26,6 +26,63 @@ is_alive() {
   [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
 }
 
+extract_port_from_url() {
+  local url="$1"
+  local hostport
+  hostport="${url#*://}"
+  hostport="${hostport%%/*}"
+  if [[ "$hostport" == *:* ]]; then
+    echo "${hostport##*:}"
+    return
+  fi
+  if [[ "$url" == https://* ]]; then
+    echo "443"
+    return
+  fi
+  echo "80"
+}
+
+port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -n tcp "$port" >/dev/null 2>&1
+    return $?
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "( sport = :$port )" 2>/dev/null | tail -n +2 | grep -q .
+    return $?
+  fi
+  return 1
+}
+
+describe_port_owner() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN | sed -n '2p'
+    return
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -v -n tcp "$port" 2>/dev/null | tail -n +2 | head -n 1
+    return
+  fi
+  echo "owner unknown (install lsof/fuser for details)"
+}
+
+ensure_port_free() {
+  local port="$1"
+  local name="$2"
+  if port_in_use "$port"; then
+    echo "[dev_up] port $port already in use ($name)" >&2
+    echo "[dev_up] listener: $(describe_port_owner "$port")" >&2
+    echo "[dev_up] run scripts/dev_down.sh or stop the process above, then retry." >&2
+    exit 1
+  fi
+}
+
 wait_http_ok() {
   local url="$1"
   local label="$2"
@@ -59,7 +116,7 @@ cleanup_on_error() {
 trap 'cleanup_on_error $?' EXIT
 
 require_cmd uv
-require_cmd npm
+require_cmd node
 require_cmd curl
 
 mkdir -p "$LOG_DIR"
@@ -72,6 +129,10 @@ if [[ -f "$PID_FILE" ]]; then
     exit 1
   fi
 fi
+
+ensure_port_free "$(extract_port_from_url "$ORCH_URL")" "orchestrator"
+ensure_port_free "$(extract_port_from_url "$BFF_URL")" "bff"
+ensure_port_free "$(extract_port_from_url "$WEB_URL")" "web"
 
 cd "$ROOT_DIR"
 nohup uv run python -m uvicorn services.orchestrator.app.main:app --host 127.0.0.1 --port 9001 --reload \
@@ -89,7 +150,8 @@ echo "[dev_up] started bff pid=$BFF_PID"
 wait_http_ok "$BFF_URL/api/health" "bff"
 
 cd "$ROOT_DIR/web"
-nohup npm run dev >"$LOG_DIR/web.log" 2>&1 &
+# Use Next.js CLI directly so the recorded PID maps to the long-lived dev process.
+nohup node ./node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3000 >"$LOG_DIR/web.log" 2>&1 &
 WEB_PID=$!
 echo "[dev_up] started web pid=$WEB_PID"
 wait_http_ok "$WEB_URL/runs" "web"

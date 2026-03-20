@@ -1,11 +1,11 @@
 import type { RunStatus } from "@/lib/types";
 
 const statusStyleMap: Record<RunStatus, string> = {
-  pending: "bg-slate-100/90 text-slate-700 border-slate-300",
-  running: "bg-cyan-50/95 text-cyan-700 border-cyan-300 shadow-[0_6px_14px_rgba(24,132,183,0.18)]",
-  succeeded: "bg-emerald-50/95 text-emerald-700 border-emerald-300",
-  failed: "bg-rose-50/95 text-rose-700 border-rose-300",
-  canceled: "bg-amber-50/95 text-amber-700 border-amber-300"
+  pending: "bg-slate-900/70 text-slate-200 border-slate-600",
+  running: "bg-cyan-900/45 text-cyan-200 border-cyan-500/70 shadow-[0_6px_14px_rgba(24,132,183,0.28)]",
+  succeeded: "bg-emerald-900/45 text-emerald-200 border-emerald-500/70",
+  failed: "bg-rose-900/45 text-rose-200 border-rose-500/70",
+  canceled: "bg-amber-900/45 text-amber-200 border-amber-500/70"
 };
 
 export function RunStatusBadge({ status }: { status: RunStatus }) {

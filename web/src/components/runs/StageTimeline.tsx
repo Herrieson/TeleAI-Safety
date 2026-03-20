@@ -6,7 +6,7 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
     return <p className="text-sm text-slate-600">No stage records.</p>;
   }
   return (
-    <ul className="stage-list">
+    <ul className="stage-list reveal-grid">
       {stages.map((stage, index) => (
         <li className="stage-item" key={`${stage.stage}-${stage.updated_at}-${stage.status}`}>
           <div className="mb-2 flex items-center justify-between gap-3">
@@ -35,7 +35,7 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
             </p>
           </div>
           {stage.command ? (
-            <p className="mt-2 truncate rounded-lg border border-slate-200/90 bg-white/70 px-2 py-1.5 mono text-[11px] text-slate-700">
+            <p className="tech-subpanel mt-2 truncate px-2 py-1.5 mono text-[11px] text-slate-700">
               {stage.command}
             </p>
           ) : null}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { AnimatedNumber } from "@/components/common/AnimatedNumber";
 import { ArtifactTable } from "@/components/runs/ArtifactTable";
 import { MetricCards } from "@/components/runs/MetricCards";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -240,6 +241,14 @@ export default function RunDetailPage() {
             <p className="label mb-1">Run Detail</p>
             <h2 className="title-gradient font-headline text-2xl font-semibold">{run.name}</h2>
             <p className="mono mt-2 text-xs text-slate-600">{run.run_id}</p>
+            <div className="hud-strip mt-2">
+              <span className="hud-pill">Execution Trace</span>
+              <span className="hud-pill">Artifact Graph</span>
+              <span className="hud-pill hud-pill-live">
+                <span className="refresh-dot" />
+                Monitor
+              </span>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <RunStatusBadge status={run.status} />
@@ -305,18 +314,24 @@ export default function RunDetailPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <article className="panel p-4 lg:col-span-3">
             <p className="label mb-2">Stage Snapshot</p>
-            <div className="stat-grid">
+            <div className="stat-grid reveal-grid">
               <article className="stat-card">
                 <p className="label mb-2">Total Stages</p>
-                <p className="stat-value">{stageStats.total}</p>
+                <p className="stat-value">
+                  <AnimatedNumber value={stageStats.total} />
+                </p>
               </article>
               <article className="stat-card">
                 <p className="label mb-2">Completed</p>
-                <p className="stat-value">{stageStats.done}</p>
+                <p className="stat-value">
+                  <AnimatedNumber value={stageStats.done} />
+                </p>
               </article>
               <article className="stat-card">
                 <p className="label mb-2">Failed</p>
-                <p className="stat-value">{stageStats.failed}</p>
+                <p className="stat-value">
+                  <AnimatedNumber value={stageStats.failed} />
+                </p>
               </article>
             </div>
           </article>

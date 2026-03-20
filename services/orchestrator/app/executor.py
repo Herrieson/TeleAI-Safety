@@ -880,15 +880,48 @@ def _load_metric_summary(eval_root: Path) -> dict:
             return None
         return sum(values) / len(values)
 
+    frr_avg = _avg(frr_vals)
+    if frr_avg is None:
+        frr_avg = _load_frr_avg_from_all_metrics(eval_root)
+
     return {
         "rows": rows,
         "attack_run_count": len(attack_runs),
         "scorer_count": len(scorers),
         "asr_avg": _avg(asr_vals),
         "asr_effective_avg": _avg(asr_effective_vals),
-        "frr_avg": _avg(frr_vals),
+        "frr_avg": frr_avg,
         "scorers": sorted(scorers),
     }
+
+
+def _load_frr_avg_from_all_metrics(eval_root: Path) -> Optional[float]:
+    summary_path = eval_root / "all_metrics_summary.csv"
+    if not summary_path.exists():
+        return None
+
+    attack_vals: List[float] = []
+    model_vals: List[float] = []
+    with summary_path.open("r", encoding="utf-8", errors="replace") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            raw = (row.get("avg_frr") or "").strip()
+            if not raw:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            kind = (row.get("record_type") or "").strip().lower()
+            if kind == "attack":
+                attack_vals.append(value)
+            elif kind == "model":
+                model_vals.append(value)
+
+    values = attack_vals or model_vals
+    if not values:
+        return None
+    return sum(values) / len(values)
 
 
 def _resolve_manifest(run: RunRecord) -> Optional[Path]:

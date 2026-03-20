@@ -21,6 +21,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <p className="label mb-1">TeleRT</p>
                 <h1 className="title-gradient font-headline text-2xl font-semibold md:text-3xl">Runs Console</h1>
                 <p className="brand-subtitle">Red Team Pipeline Control Plane</p>
+                <div className="hud-strip mt-2">
+                  <span className="hud-pill hud-pill-live">
+                    <span className="refresh-dot" />
+                    Live Telemetry
+                  </span>
+                  <span className="hud-pill">AI Safety Ops</span>
+                  <span className="hud-pill">Human-in-the-loop</span>
+                </div>
               </div>
             </div>
             <nav className="flex items-center gap-2 text-sm">

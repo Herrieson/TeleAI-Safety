@@ -15,6 +15,19 @@ function summarizeStages(run: Run) {
   return run.stages.map((stage) => `${stage.stage}:${stage.status}`).join(" | ");
 }
 
+function modeStyle(mode: Run["mode"]): string {
+  if (mode === "full_pipeline") {
+    return "mode-chip mode-chip-full";
+  }
+  if (mode === "attack_only") {
+    return "mode-chip mode-chip-attack";
+  }
+  if (mode === "benchmark_only") {
+    return "mode-chip mode-chip-benchmark";
+  }
+  return "mode-chip mode-chip-eval";
+}
+
 function renderUpdatedAt(raw: string): string {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) {
@@ -47,7 +60,9 @@ export function RunTable({ runs, onCancel, onDelete, actionRunId, actionKind, em
                 <p className="font-headline font-semibold text-slate-900">{run.name}</p>
                 <p className="mono mt-1 text-xs text-slate-500">{run.run_id}</p>
               </td>
-              <td className="text-slate-700">{run.mode}</td>
+              <td>
+                <span className={modeStyle(run.mode)}>{run.mode.replace("_", " ")}</span>
+              </td>
               <td>
                 <RunStatusBadge status={run.status} />
               </td>

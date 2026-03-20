@@ -103,7 +103,7 @@ BFF_CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 
 1. 增加日志流式接口（SSE）
 2. 引入队列（Redis + Worker）替换进程内线程执行
-3. 将 in-memory store 替换为 Postgres
+3. 将本地文件快照 store（当前 `data/service_runs/_state/runs_store.json`）替换为 Postgres
 4. 补齐评测结果细粒度入库（按 model/attack/scorer）
 
 ## Quick Attack 请求示例

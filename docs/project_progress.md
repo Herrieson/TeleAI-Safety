@@ -57,6 +57,7 @@
 1. 架构方案：`docs/bff_frontend_backend_plan.md`
 2. 前端实现计划：`docs/frontend_ui_plan.md`
 3. 迭代拆解：`docs/bff_iteration_plan.md`
+4. 平台托管凭据方案：`docs/platform_managed_credentials_plan.md`
 
 ## 6. UI 体验升级专项进度清单（2026-03-20 启动）
 
@@ -71,3 +72,13 @@
 9. [x] 完成性能优化与回归（渲染、轮询影响、滚动体验）
 10. [x] 完成响应式与可访问性验收（桌面/移动）
 11. [ ] 评审验收与上线发布
+
+## 7. 平台托管凭据专项进度清单（2026-03-20 启动）
+
+1. [x] 输出并评审托管凭据方案文档（Model Profile + Secret Manager）
+2. [ ] 完成数据模型设计与 migration（credentials/model_profiles/runs）
+3. [ ] 完成 BFF 侧 `model-profiles` 查询与 run 创建改造
+4. [ ] 完成执行器按 `credential_id` 拉取密钥并调用模型
+5. [ ] 完成前端 `New Run` profile 下拉改造并删除明文密钥输入
+6. [ ] 完成日志脱敏、审计、RBAC 基线能力
+7. [ ] 完成密钥轮换演练与上线验收

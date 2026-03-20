@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, cancelRun, deleteRun, getRuns } from "@/lib/api";
+import { AnimatedNumber } from "@/components/common/AnimatedNumber";
 import { RunTable } from "@/components/runs/RunTable";
 import type { Run, RunStatus } from "@/lib/types";
 
@@ -78,7 +79,7 @@ export default function RunsPage() {
     const active = runs.filter((run) => run.status === "running" || run.status === "pending").length;
     const succeeded = runs.filter((run) => run.status === "succeeded").length;
     const failures = runs.filter((run) => run.status === "failed").length;
-    const successRate = total ? `${Math.round((succeeded / total) * 100)}%` : "-";
+    const successRate = total ? (succeeded / total) * 100 : 0;
     return { total, active, failures, successRate };
   }, [runs]);
 
@@ -135,6 +136,14 @@ export default function RunsPage() {
           <p className="mt-1 text-sm text-slate-600">
             Auto refresh every {Math.floor(POLL_INTERVAL_MS / 1000)}s. Use status chips for quick filtering.
           </p>
+          <div className="hud-strip mt-2">
+            <span className="hud-pill">Ops Dashboard</span>
+            <span className="hud-pill">Pipeline Telemetry</span>
+            <span className="hud-pill hud-pill-live">
+              <span className="refresh-dot" />
+              Live View
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="label" htmlFor="statusFilter">
@@ -170,22 +179,30 @@ export default function RunsPage() {
           </button>
         ))}
       </div>
-      <div className="stat-grid mb-5">
+      <div className="stat-grid reveal-grid mb-5">
         <article className="stat-card">
           <p className="label mb-2">Total Runs</p>
-          <p className="stat-value">{runStats.total}</p>
+          <p className="stat-value">
+            <AnimatedNumber value={runStats.total} />
+          </p>
         </article>
         <article className="stat-card">
           <p className="label mb-2">Active</p>
-          <p className="stat-value">{runStats.active}</p>
+          <p className="stat-value">
+            <AnimatedNumber value={runStats.active} />
+          </p>
         </article>
         <article className="stat-card">
           <p className="label mb-2">Failed</p>
-          <p className="stat-value">{runStats.failures}</p>
+          <p className="stat-value">
+            <AnimatedNumber value={runStats.failures} />
+          </p>
         </article>
         <article className="stat-card">
           <p className="label mb-2">Success Rate</p>
-          <p className="stat-value">{runStats.successRate}</p>
+          <p className="stat-value">
+            <AnimatedNumber decimals={1} suffix="%" value={runStats.successRate} />
+          </p>
         </article>
       </div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
