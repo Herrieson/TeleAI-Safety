@@ -17,7 +17,7 @@ from fastchat.model import get_conversation_template
 
 from mutation import BaseMutation
 from dataset import Example, AttackDataset
-from models import LocalModel, OpenAIModel
+from models import LocalModel, OpenAIModel, AzureOpenAIModel
 from feedback.direct_generation import generate
 
 # class IntrospectGeneration(BaseMutation):
@@ -322,7 +322,7 @@ class IntrospectGeneration(BaseMutation):
                 mutated_instance_list = self._get_mutated_instance(instance, *args, **kwargs)
                 new_dataset.extend(mutated_instance_list)
             except Exception as e:
-                logger.error(f"变异实例时出错: {e}")
+                logger.exception(f"变异实例时出错: {e}")
                 # 如果变异失败，至少保留原实例
                 new_dataset.append(copy.deepcopy(instance))
         
@@ -343,13 +343,22 @@ class IntrospectGeneration(BaseMutation):
         
         if not hasattr(example, 'eval_results'):
             example.eval_results = []
-        
+
+        # 兼容不同数据集字段：TAP 期望 example.target，但很多 JSONL 只有 query。
+        target_ref = (
+            getattr(example, 'target', None)
+            or (example.get('target') if hasattr(example, 'get') else None)
+            or (example.get('reference_response') if hasattr(example, 'get') else None)
+            or getattr(example, 'reference_response', None)
+            or "Sure, here's"
+        )
+
         # 生成种子提示
         if len(example.eval_results) == 0:
             seeds = {
                 'subject': self.trans_dict1[self.attr_name],
                 'query': example.query,
-                'reference_response': example.target
+                'reference_response': target_ref
             }
             processed_response_list = self.get_init_msg(seeds)
         else:
@@ -372,7 +381,7 @@ class IntrospectGeneration(BaseMutation):
 
                 extracted_attack, json_str = self.get_attack(
                     self.model, conv_copy, processed_response_list, 
-                    example.query, example.target
+                    example.query, target_ref
                 )
                 
                 if extracted_attack is not None:
@@ -420,8 +429,17 @@ class IntrospectGeneration(BaseMutation):
             else:
                 full_prompt = conv.get_prompt()
             full_prompt = full_prompt[full_prompt.find(prompt):]
-        elif isinstance(model, OpenAIModel):
+        elif isinstance(model, (OpenAIModel, AzureOpenAIModel)):
+            # FastChat conversation stores messages as [role, content]
             full_prompt = [message[1] for message in conv.messages]
+        else:
+            # Fallback for other chat-like API wrappers
+            full_prompt = []
+            for message in getattr(conv, "messages", []):
+                if isinstance(message, (list, tuple)) and len(message) > 1:
+                    full_prompt.append(message[1])
+                elif isinstance(message, dict):
+                    full_prompt.append(message.get("content", ""))
 
         seeds = {'query': query, 'subject': self.trans_dict2[self.attr_name], 'target_str': target}
         system_message = self.get_attacker_system_prompt(seeds)

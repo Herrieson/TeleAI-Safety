@@ -14,7 +14,10 @@ import random
 import string
 import torch
 import numpy as np
-import tiktoken
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from loguru import logger
@@ -262,11 +265,16 @@ class LAAInit:
         # Set up tokenizer and encoding functions
         if config.model_type == 'openai' or 'gpt' in config.target_model_name.lower():
             self.tokenizer = None
-            self.config.max_token_value = None  
-            import tiktoken
-            self.encoding = tiktoken.encoding_for_model(config.target_model_name) if 'gpt' in config.target_model_name.lower() else tiktoken.get_encoding("cl100k_base")
-            self.encode = lambda text: self.encoding.encode(text)  
-            self.decode = lambda tokens: self.encoding.decode(tokens)
+            self.config.max_token_value = None
+            if tiktoken is not None:
+                self.encoding = tiktoken.encoding_for_model(config.target_model_name) if 'gpt' in config.target_model_name.lower() else tiktoken.get_encoding("cl100k_base")
+                self.encode = lambda text: self.encoding.encode(text)
+                self.decode = lambda tokens: self.encoding.decode(tokens)
+            else:
+                logger.warning("tiktoken is not installed; falling back to byte-level encoding for LAA on API models.")
+                self.encoding = None
+                self.encode = lambda text: list(text.encode('utf-8', errors='ignore'))
+                self.decode = lambda tokens: bytes((int(t) % 256 for t in tokens)).decode('utf-8', errors='ignore')
         else:
             # For local models
             if hasattr(self.targetLM, 'tokenizer'):
@@ -330,14 +338,22 @@ class LAAFeedback:
         # Fallback: simulate logprobs based on response quality with better generation
         try:
             messages = build_messages(msg, inputs=inputs, system_prompt=system_prompt)
-            response = targetLM.chat(
-                messages,
-                max_new_tokens=200,
-                temperature=0.8,
-                do_sample=True,
-                top_p=0.9,
-                repetition_penalty=1.1
-            )
+            if hasattr(targetLM, 'client'):
+                response = targetLM.chat(
+                    messages,
+                    max_tokens=200,
+                    temperature=0.8,
+                    top_p=0.9,
+                )
+            else:
+                response = targetLM.chat(
+                    messages,
+                    max_new_tokens=200,
+                    temperature=0.8,
+                    do_sample=True,
+                    top_p=0.9,
+                    repetition_penalty=1.1,
+                )
         except Exception as e:
             logger.debug(f"Chat generation failed: {e}")
             response = ""
@@ -573,32 +589,40 @@ class LAAManager(BaseAttackManager):
                 msg = insert_adv_string(self.data.orig_msg, adv)
 
 
-        # Get final response with improved generation parameters
-        generation_kwargs = {
-            'max_new_tokens': max(1, int(self.config.target_max_n_tokens)),
-            'temperature': self.config.target_temperature,
-            'do_sample': True,
-            'top_p': self.config.target_top_p,
-            'top_k': 50,
-            'repetition_penalty': 1.1,
-            'no_repeat_ngram_size': 3,
-        }
-        
-        # Set pad_token_id if available
-        if hasattr(self.initializer.targetLM, 'tokenizer') and self.initializer.targetLM.tokenizer.pad_token_id is not None:
-            generation_kwargs['pad_token_id'] = self.initializer.targetLM.tokenizer.pad_token_id
-        
-        # Set eos_token_id to prevent early stopping - use a different token temporarily
-        if hasattr(self.initializer.targetLM, 'tokenizer') and self.initializer.targetLM.tokenizer.eos_token_id is not None:
-            # Use a less common token as eos to prevent early termination
-            original_eos = self.initializer.targetLM.tokenizer.eos_token_id
-            # Try to use a period token or similar as temporary eos
-            try:
-                period_token_id = self.initializer.targetLM.tokenizer.encode('.', add_special_tokens=False)[0]
-                generation_kwargs['eos_token_id'] = period_token_id
-            except:
-                # If that fails, just use the original but increase max tokens
-                generation_kwargs['eos_token_id'] = original_eos
+        # Get final response with model-compatible generation parameters
+        is_api_model = hasattr(self.initializer.targetLM, 'client')
+        if is_api_model:
+            generation_kwargs = {
+                'max_tokens': max(1, int(self.config.target_max_n_tokens)),
+                'temperature': self.config.target_temperature,
+                'top_p': self.config.target_top_p,
+            }
+        else:
+            generation_kwargs = {
+                'max_new_tokens': max(1, int(self.config.target_max_n_tokens)),
+                'temperature': self.config.target_temperature,
+                'do_sample': True,
+                'top_p': self.config.target_top_p,
+                'top_k': 50,
+                'repetition_penalty': 1.1,
+                'no_repeat_ngram_size': 3,
+            }
+
+            # Set pad_token_id if available
+            if hasattr(self.initializer.targetLM, 'tokenizer') and self.initializer.targetLM.tokenizer.pad_token_id is not None:
+                generation_kwargs['pad_token_id'] = self.initializer.targetLM.tokenizer.pad_token_id
+
+            # Set eos_token_id to prevent early stopping - use a different token temporarily
+            if hasattr(self.initializer.targetLM, 'tokenizer') and self.initializer.targetLM.tokenizer.eos_token_id is not None:
+                # Use a less common token as eos to prevent early termination
+                original_eos = self.initializer.targetLM.tokenizer.eos_token_id
+                # Try to use a period token or similar as temporary eos
+                try:
+                    period_token_id = self.initializer.targetLM.tokenizer.encode('.', add_special_tokens=False)[0]
+                    generation_kwargs['eos_token_id'] = period_token_id
+                except Exception:
+                    # If that fails, just use the original but increase max tokens
+                    generation_kwargs['eos_token_id'] = original_eos
         
         final_input = build_messages(
             self.state.best_msg,
@@ -640,17 +664,24 @@ class LAAManager(BaseAttackManager):
             
             # Try with different parameters
             alternative_kwargs = generation_kwargs.copy()
-            alternative_kwargs.update({
-                'max_new_tokens': 800,
-                'temperature': 1.0,
-                'do_sample': True,
-                'top_p': 0.95,
-                'repetition_penalty': 1.05
-            })
-            
-            # Remove eos_token_id restriction for retry
-            if 'eos_token_id' in alternative_kwargs:
-                del alternative_kwargs['eos_token_id']
+            if is_api_model:
+                alternative_kwargs.update({
+                    'max_tokens': 800,
+                    'temperature': 1.0,
+                    'top_p': 0.95,
+                })
+            else:
+                alternative_kwargs.update({
+                    'max_new_tokens': 800,
+                    'temperature': 1.0,
+                    'do_sample': True,
+                    'top_p': 0.95,
+                    'repetition_penalty': 1.05,
+                })
+
+                # Remove eos_token_id restriction for retry
+                if 'eos_token_id' in alternative_kwargs:
+                    del alternative_kwargs['eos_token_id']
             
             try:
                 retry_response = self.initializer.targetLM.chat(

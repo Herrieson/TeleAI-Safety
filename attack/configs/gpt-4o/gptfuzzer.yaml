@@ -1,0 +1,53 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+image_root_in: null
+
+# Attack model (used for mutating jailbreak prompts)
+attack_model_type: azure_openai
+attack_model_name: gpt-4o
+attack_model_path: ""
+
+# Target model (model under test)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Optional generation config for the attack/target models
+attack_model_generation_config:
+  max_tokens: 512
+  temperature: 0.8
+  top_p: 0.9
+target_model_generation_config:
+  max_tokens: 512
+  temperature: 0.8
+  top_p: 1.0
+
+# GPTFuzzer parameters
+eval_model_path: hubert233/GPTFuzz
+seeds_num: 76
+energy: 5
+max_query: 100000
+max_jailbreak: 100000
+max_reject: 100000
+max_iteration: 20
+template_file: ./initialization/init_templates.json
+device: cpu
+
+# Target generation
+target_system_prompt: null
+target_max_n_tokens: 512
+target_temperature: 0.8
+target_top_p: 1.0
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/gptfuzzer.jsonl
+log_path: ./logs/gptfuzzer.log

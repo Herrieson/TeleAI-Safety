@@ -20,7 +20,11 @@ from selection import DeleteOffTopic, ScoresSelection
 from dataset import AttackDataset, Example
 import logger
 from utils import BaseAttackManager, ConfigManager, parse_arguments
-from evaluation import PromptedLLMScorer, PatternScorer, HarmBenchScorer, LlamaGuard3Scorer
+from evaluation import PromptedLLMScorer, PatternScorer, HarmBenchScorer
+try:
+    from evaluation import LlamaGuard3Scorer
+except ImportError:
+    LlamaGuard3Scorer = None
 from mutation import *
 from models import load_model, LocalModel, OpenAIModel, FORMATTER_REGISTRY, DefaultFormatter, AzureOpenAIModel
 import logging
@@ -156,6 +160,9 @@ class TAPEvaluator:
         elif evaluator_type == "harmbench":
             self.scorer = HarmBenchScorer(model_path=evaluator_model_path, tokenizer_path=evaluator_model_path)
         elif evaluator_type == "llamaguard3":
+            if LlamaGuard3Scorer is None:
+                raise ImportError("LlamaGuard3Scorer is not available in attack/evaluation. "
+                                  "Use evaluator_type=pattern or harmbench, or add llama_guard_3_scorer.py export.")
             self.scorer = LlamaGuard3Scorer(model_path=evaluator_model_path, tokenizer_path=evaluator_model_path)
         else:
             raise ValueError(f"Invalid evaluator type: {evaluator_type}")
@@ -375,7 +382,16 @@ class TAPManager(BaseAttackManager):
                 continue
             print(f"QUERY:{'='*20}\n{query}")
 
-            self.data.batch = [AttackDataset([copy.deepcopy(example)]) for _ in range(self.config.root_num)]
+            seed_example = copy.deepcopy(example)
+            if not hasattr(seed_example, "query") or not getattr(seed_example, "query", None):
+                seed_example.query = query
+            if not hasattr(seed_example, "target") or not getattr(seed_example, "target", None):
+                seed_example.target = (
+                    base_record.get("target")
+                    or base_record.get("reference_response")
+                    or "Sure, here's"
+                )
+            self.data.batch = [AttackDataset([copy.deepcopy(seed_example)]) for _ in range(self.config.root_num)]
 
             for iteration in range(1, self.config.tree_depth + 1):
                 self.data.iteration = iteration
@@ -501,7 +517,16 @@ class TAPManager(BaseAttackManager):
                   continue
             print(f"QUERY:{'='*20}\n{query}")
 
-            self.data.batch = [AttackDataset([copy.deepcopy(example)]) for _ in range(self.config.root_num)]
+            seed_example = copy.deepcopy(example)
+            if not hasattr(seed_example, "query") or not getattr(seed_example, "query", None):
+                seed_example.query = query
+            if not hasattr(seed_example, "target") or not getattr(seed_example, "target", None):
+                seed_example.target = (
+                    base_record.get("target")
+                    or base_record.get("reference_response")
+                    or "Sure, here's"
+                )
+            self.data.batch = [AttackDataset([copy.deepcopy(seed_example)]) for _ in range(self.config.root_num)]
 
             for iteration in range(1, self.config.tree_depth + 1):
                   self.data.iteration = iteration
@@ -577,11 +602,14 @@ class TAPManager(BaseAttackManager):
                               is_success = self.evaluator.score(ex.query, ex.target_responses[-1])
                               if is_success:
                                     ex.eval_results[-1] = 100
-                              self.data.find_flag = True
-                              break
+                                    self.data.find_flag = True
+                                    break
                         except Exception as e:
                               logger.error(f"Failed: {e}")
                               continue
+
+                  if len(new_dataset) == 0:
+                        continue
 
                   new_example = max(new_dataset, key=lambda ex: ex.eval_results[-1] if ex.eval_results else 0)
                   new_example.eval_results = [1]
@@ -611,11 +639,15 @@ class TAPManager(BaseAttackManager):
             os.path.join(os.path.dirname(os.path.abspath(__file__)), self.config.res_save_path)
       ))
 
-      if self.data.find_flag:
+      if self.data.find_flag and 'new_example' in locals() and hasattr(new_example, 'jailbreak_prompt'):
             return new_example.jailbreak_prompt
-      else:
+
+      if 'new_dataset' in locals() and new_dataset:
             new_example = max(new_dataset, key=lambda ex: ex.eval_results[-1] if ex.eval_results else 0)
             return new_example.jailbreak_prompt
+
+      logger.warning("No valid TAP candidates generated; returning empty prompt.")
+      return ""
 
 
 def main():

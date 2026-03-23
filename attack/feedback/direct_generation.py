@@ -247,37 +247,30 @@ def generate(object, messages, input_field_name='input_ids', AzureOpenAI_name=No
             output = ""
             
     # Azure Model 调用逻辑
-    elif isinstance(object, AzureOpenAI):
+    elif isinstance(object, AzureOpenAIModel):
         try:
             response = object.client.chat.completions.create(
-                model=AzureOpenAI_name,
-                # messages=object.conversation.to_openai_api_messages(),
-                messages=[
-                    # {"role": "system", "content": object.sys_prompt},
-                    {"role": "user", "content": message}
-                ],
+                model=object.model_name,
+                messages=object.conversation.to_openai_api_messages(),
                 **kwargs,
                 **object.generation_config
             )
 
-            # print("[DEBUG] Raw OpenAI response:", response)
-
             if isinstance(response, str):
                 try:
                     parsed = json.loads(response)
-                    # print("[DEBUG] Parsed JSON:", parsed)
                     output = parsed["choices"][0]["message"]["content"]
                 except Exception as e:
-                    print("[ERROR] Failed to parse OpenAI string response as JSON:", e)
+                    print("[ERROR] Failed to parse AzureOpenAI string response as JSON:", e)
                     output = response
             elif hasattr(response, "choices"):
                 output = response.choices[0].message.content
             else:
-                print("[ERROR] Unexpected response type:", type(response))
+                print("[ERROR] Unexpected Azure response type:", type(response))
                 output = str(response)
 
         except Exception as e:
-            print(f"[ERROR] OpenAIModel generate failed with exception: {e}")
+            print(f"[ERROR] AzureOpenAIModel generate failed with exception: {e}")
             output = ""
 
     else:

@@ -76,10 +76,12 @@ class AzureOpenAIModel:
                 logger.debug(f"[Raw Response]\n{response}")
 
                 choices = getattr(response, "choices", [])
-                if not choices or not getattr(choices[0].message, "content", "").strip():
+                if not choices:
                     raise Exception("Empty or invalid response from AzureOpenAI")
 
-                content = choices[0].message.content.strip()
+                content = self._extract_content_from_response(response)
+                if not content:
+                    raise Exception("Empty or invalid response from AzureOpenAI")
                 return content
 
 
@@ -140,6 +142,18 @@ class AzureOpenAIModel:
                         'n_output_tokens': response.usage.completion_tokens,
                     }
                     break
+                except BadRequestError as e:
+                    if "filtered due to the prompt triggering" in str(e):
+                        logger.warning("Prompt was filtered by Azure content policy in get_response; skipping retries for this input.")
+                        output = {
+                            'text': '[Filtered by Content Policy]',
+                            'logprobs': [],
+                            'n_input_tokens': 0,
+                            'n_output_tokens': 0,
+                        }
+                        break
+                    logger.error(f"[get_response BadRequest] {type(e)} {e}")
+                    time.sleep(self.API_RETRY_SLEEP)
                 except Exception as e:
                     logger.error(f"[get_response Retry] {type(e)} {e}")
                     time.sleep(self.API_RETRY_SLEEP)

@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import pandas as pd
 from tqdm import tqdm
@@ -51,22 +51,63 @@ class ScavPromptOptimizer:
     def __init__(self, prompt_file: str, max_round: int = 1):
         self.prompt_file = prompt_file
         self.max_round = max_round
-        self.df = pd.read_csv(prompt_file, header=None)
+        self.df, self.source_col, self.target_col = self._load_mapping_df(prompt_file)
+        self.norm_sources = self.df[self.source_col].astype(str).apply(self._normalize)
+        self.stats = {
+            "lookups": 0,
+            "exact": 0,
+            "contains": 0,
+            "fallback": 0,
+        }
 
     @staticmethod
     def _normalize(text: str) -> str:
         return " ".join(text.strip().lower().split())
 
+    @staticmethod
+    def _load_mapping_df(prompt_file: str):
+        # Preferred schema from optimized SCAV outputs.
+        df = pd.read_csv(prompt_file)
+        col_map = {str(col).strip().lower(): col for col in df.columns}
+        if "original_instruction" in col_map and "best_instruction" in col_map:
+            source_col = col_map["original_instruction"]
+            target_col = col_map["best_instruction"]
+            mapped = df[[source_col, target_col]].dropna()
+            if mapped.empty:
+                raise ValueError(f"SCAV mapping file has no valid rows: {prompt_file}")
+            return mapped, source_col, target_col
+
+        # Legacy compact schema: exactly two columns without headers.
+        df_legacy = pd.read_csv(prompt_file, header=None)
+        if df_legacy.shape[1] == 2:
+            mapped = df_legacy[[0, 1]].dropna()
+            if mapped.empty:
+                raise ValueError(f"SCAV mapping file has no valid rows: {prompt_file}")
+            return mapped, 0, 1
+
+        raise ValueError(
+            "Invalid SCAV prompt_file format. Expected columns "
+            "`original_instruction,best_instruction` or a 2-column mapping CSV. "
+            f"Got {df_legacy.shape[1]} columns from: {prompt_file}"
+        )
+
     def _lookup(self, query: str) -> List[str]:
+        self.stats["lookups"] += 1
         norm_query = self._normalize(query)
-        exact = self.df[self.df[0].astype(str).apply(self._normalize) == norm_query]
+
+        exact_mask = self.norm_sources == norm_query
+        exact = self.df.loc[exact_mask, self.target_col]
         if not exact.empty:
-            return exact[1].astype(str).tolist()
+            self.stats["exact"] += 1
+            return exact.astype(str).tolist()
 
-        contains = self.df[self.df[0].astype(str).apply(self._normalize).apply(lambda x: x in norm_query)]
+        contains_mask = self.norm_sources.apply(lambda x: bool(x) and x in norm_query)
+        contains = self.df.loc[contains_mask, self.target_col]
         if not contains.empty:
-            return contains[1].astype(str).tolist()
+            self.stats["contains"] += 1
+            return contains.astype(str).tolist()
 
+        self.stats["fallback"] += 1
         return [query]
 
     def optimize(self, query: str) -> List[str]:
@@ -77,6 +118,9 @@ class ScavPromptOptimizer:
                 new_prompts.extend(self._lookup(p))
             prompts = list(dict.fromkeys(new_prompts))
         return prompts
+
+    def get_stats(self):
+        return dict(self.stats)
 
 
 class ScavManager(BaseAttackManager):
@@ -159,6 +203,18 @@ class ScavManager(BaseAttackManager):
                     }
                 )
                 self.save(record)
+
+        stats = self.optimizer.get_stats()
+        lookups = stats["lookups"]
+        fallback_rate = (stats["fallback"] / lookups) if lookups else 0.0
+        logger.info(
+            "SCAV lookup summary: lookups=%d exact=%d contains=%d fallback=%d fallback_rate=%.2f%%",
+            lookups,
+            stats["exact"],
+            stats["contains"],
+            stats["fallback"],
+            fallback_rate * 100,
+        )
 
 
 def main():

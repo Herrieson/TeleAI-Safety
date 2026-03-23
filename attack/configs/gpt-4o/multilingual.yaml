@@ -1,0 +1,36 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+image_root_in: null
+
+# Target model (Azure OpenAI deployment name)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Multilingual settings
+mutation_method: zh-CN
+system_prompt: ""
+target_system_prompt: null
+device: cpu
+
+# Generation
+target_max_n_tokens: 512
+target_temperature: 0.7
+target_top_p: 1.0
+
+# Evaluator (optional)
+evaluator_type: pattern
+evaluator_path: null
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/multilingual.jsonl
+log_path: ./logs/multilingual.log

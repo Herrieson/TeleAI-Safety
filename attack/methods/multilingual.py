@@ -63,31 +63,22 @@ class TranslationHandler:
     def __init__(self, config: MultilingualConfig) -> None:
         """Initialize translation handler with configuration."""
         self.config = config
-        self.mutations = {
+        self.supported_languages = {
             # Chinese
-            'zh-CN': Translate(language='zh-CN'),
+            'zh-CN',
             # Italian
-            'it': Translate(language='it'),
+            'it',
             # Vietnamese
-            'vi': Translate(language='vi'),
+            'vi',
             # Arabic
-            'ar': Translate(language='ar'),
-            # # Korean
-            # 'ko': Translate(language='ko'),
-            # # Thai
-            # 'th': Translate(language='th'),
-            # # Bengali
-            # 'bn': Translate(language='bn'),
-            # # Swahili
-            # 'sw': Translate(language='sw'),
-            # # Javanese
-            # 'jv': Translate(language='jv'),
+            'ar',
         }
-        
-        if self.config.mutation_method not in self.mutations:
+
+        if self.config.mutation_method not in self.supported_languages:
             raise ValueError(f"Unsupported mutation method: {self.config.mutation_method}")
-            
-        self.mutation = self.mutations[self.config.mutation_method]
+
+        # Lazy-load only the selected language model to avoid downloading all Marian models.
+        self.mutation = Translate(language=self.config.mutation_method)
         logger.info(f"Translation handler initialized for language: {self.config.mutation_method}")
 
     def mutate(self, query: str) -> List[str]:
