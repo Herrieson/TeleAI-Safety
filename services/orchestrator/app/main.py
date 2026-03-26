@@ -18,19 +18,16 @@ from .store import run_store
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 
 LEADERBOARD_METRICS = [
-    {"key": "avg_asr", "label": "Avg ASR", "better": "lower", "format": "percent", "precision": 4},
-    {"key": "avg_frr", "label": "Avg FRR", "better": "lower", "format": "percent", "precision": 4},
-    {"key": "mu_asr", "label": "mu ASR", "better": "lower", "format": "percent", "precision": 4},
-    {"key": "sigma_asr", "label": "sigma ASR", "better": "lower", "format": "percent", "precision": 4},
+    {"key": "asr", "label": "ASR", "better": "lower", "format": "percent", "precision": 4},
+    {"key": "frr", "label": "FRR", "better": "lower", "format": "percent", "precision": 4},
     {"key": "mds", "label": "MDS", "better": "higher", "format": "number", "precision": 6},
     {"key": "bias", "label": "Bias", "better": "absolute_zero", "format": "number", "precision": 6},
     {"key": "wsl", "label": "WSL", "better": "lower", "format": "number", "precision": 6},
     {"key": "cm", "label": "CM", "better": "lower", "format": "number", "precision": 6},
-    {"key": "avg_kappa", "label": "Avg Kappa", "better": "higher", "format": "number", "precision": 6},
-    {"key": "median_kappa", "label": "Median Kappa", "better": "higher", "format": "number", "precision": 6},
-    {"key": "min_kappa", "label": "Min Kappa", "better": "higher", "format": "number", "precision": 6},
-    {"key": "max_kappa", "label": "Max Kappa", "better": "higher", "format": "number", "precision": 6},
+    {"key": "code_ability", "label": "Code Ability", "better": "higher", "format": "number", "precision": 6},
+    {"key": "hallucination", "label": "Hallucination", "better": "higher", "format": "number", "precision": 6},
 ]
+
 
 
 @app.get("/health")
@@ -225,6 +222,10 @@ def get_leaderboard():
             "rows": [],
         }
 
+    full_metrics_path = _leaderboard_full_csv_from_summary(source_path)
+    asr_map = _compute_model_asr_aggregates(full_metrics_path)
+    benchmark_map = _load_model_code_and_hallucination_scores()
+
     rows: List[Dict[str, object]] = []
     try:
         with source_path.open("r", encoding="utf-8", newline="") as handle:
@@ -237,10 +238,35 @@ def get_leaderboard():
                 if not model:
                     continue
 
-                metrics: Dict[str, Optional[float]] = {}
-                for spec in LEADERBOARD_METRICS:
-                    key = str(spec["key"])
-                    metrics[key] = _to_float(row.get(key))
+                asr_ext = asr_map.get(model) or {}
+                asr_effective = _to_float(asr_ext.get("asr_effective"))
+                asr_strict = _to_float(row.get("avg_asr"))
+                if asr_strict is None:
+                    asr_strict = _to_float(asr_ext.get("asr_strict"))
+                asr_legacy = _to_float(asr_ext.get("asr_legacy"))
+
+                asr_values = [
+                    value
+                    for value in (asr_effective, asr_strict, asr_legacy)
+                    if isinstance(value, (int, float))
+                ]
+                asr_value = _mean([float(value) for value in asr_values])
+
+                benchmark_ext = benchmark_map.get(model) or {}
+
+                metrics: Dict[str, Optional[float]] = {
+                    "asr": asr_value,
+                    "frr": _to_float(row.get("avg_frr")),
+                    "mds": _to_float(row.get("mds")),
+                    "bias": _to_float(row.get("bias")),
+                    "wsl": _to_float(row.get("wsl")),
+                    "cm": _to_float(row.get("cm")),
+                    "code_ability": _to_float(benchmark_ext.get("code_ability")),
+                    "hallucination": _to_float(benchmark_ext.get("hallucination")),
+                    "asr_effective": asr_effective,
+                    "asr_strict": asr_strict,
+                    "asr_legacy": asr_legacy,
+                }
 
                 rows.append(
                     {
@@ -261,6 +287,7 @@ def get_leaderboard():
         "metrics": _public_leaderboard_metrics(),
         "rows": rows,
     }
+
 
 
 def _load_metric_tasks(run_id: str) -> List[Dict[str, object]]:
@@ -436,8 +463,10 @@ def _to_int(value: Optional[str]) -> Optional[int]:
         return None
 
 
-def _to_float(value: Optional[str]) -> Optional[float]:
-    raw = (value or "").strip()
+def _to_float(value: object) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    raw = str(value or "").strip()
     if not raw:
         return None
     try:
@@ -489,6 +518,125 @@ def _find_leaderboard_source_file() -> Optional[Path]:
 
     candidates.sort(key=lambda row: row.stat().st_mtime, reverse=True)
     return candidates[0]
+
+
+def _leaderboard_full_csv_from_summary(summary_path: Path) -> Optional[Path]:
+    full_path = summary_path.with_name("all_metrics_full.csv")
+    if full_path.exists() and full_path.is_file():
+        return full_path
+    return None
+
+
+def _mean(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _compute_model_asr_aggregates(full_metrics_path: Optional[Path]) -> Dict[str, Dict[str, Optional[float]]]:
+    if full_metrics_path is None or not full_metrics_path.exists() or not full_metrics_path.is_file():
+        return {}
+
+    strict_map: Dict[str, List[float]] = {}
+    effective_map: Dict[str, List[float]] = {}
+    legacy_map: Dict[str, List[float]] = {}
+
+    try:
+        with full_metrics_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                model = (row.get("model") or row.get("attack_group") or "").strip()
+                if not model:
+                    continue
+
+                strict = _to_float(row.get("ASR_avg_all_scorers"))
+                effective = _to_float(row.get("ASR_effective_avg_all_scorers"))
+
+                legacy_values: List[float] = []
+                for key, value in row.items():
+                    if not key.startswith("ASR_"):
+                        continue
+                    if "legacy" not in key.lower():
+                        continue
+                    parsed = _to_float(value)
+                    if parsed is not None:
+                        legacy_values.append(parsed)
+
+                legacy = _mean(legacy_values)
+
+                if strict is not None:
+                    strict_map.setdefault(model, []).append(strict)
+                if effective is not None:
+                    effective_map.setdefault(model, []).append(effective)
+                if legacy is not None:
+                    legacy_map.setdefault(model, []).append(legacy)
+    except OSError:
+        return {}
+
+    model_names = set(strict_map) | set(effective_map) | set(legacy_map)
+    out: Dict[str, Dict[str, Optional[float]]] = {}
+    for model in model_names:
+        out[model] = {
+            "asr_strict": _mean(strict_map.get(model, [])),
+            "asr_effective": _mean(effective_map.get(model, [])),
+            "asr_legacy": _mean(legacy_map.get(model, [])),
+        }
+    return out
+
+
+
+def _load_benchmark_summary_overall(path: Path) -> Optional[float]:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return _to_float(payload.get("overall"))
+
+
+def _load_model_code_and_hallucination_scores() -> Dict[str, Dict[str, Optional[float]]]:
+    root = settings.repo_root / "benchmark" / "result" / "eval_from_result_auto"
+    code_root = root / "code_merged"
+    halluc_root = root / "hallucinations"
+
+    code_scores: Dict[str, float] = {}
+    if code_root.exists() and code_root.is_dir():
+        for model_dir in sorted(code_root.iterdir()):
+            if not model_dir.is_dir():
+                continue
+            overall = _load_benchmark_summary_overall(model_dir / "benchmark_summary.json")
+            if overall is None:
+                continue
+            code_scores[model_dir.name] = overall
+
+    hallucination_scores: Dict[str, float] = {}
+    hallucination_parts = [
+        "hallucinations_merged_law_text",
+        "hallucinations_merged_legal_basics",
+        "hallucinations_merged_scenario",
+    ]
+    if halluc_root.exists() and halluc_root.is_dir():
+        for model_dir in sorted(halluc_root.iterdir()):
+            if not model_dir.is_dir():
+                continue
+            values: List[float] = []
+            for part in hallucination_parts:
+                overall = _load_benchmark_summary_overall(model_dir / part / "benchmark_summary.json")
+                if overall is not None:
+                    values.append(overall)
+            if values:
+                hallucination_scores[model_dir.name] = sum(values)
+
+    models = set(code_scores) | set(hallucination_scores)
+    merged: Dict[str, Dict[str, Optional[float]]] = {}
+    for model in models:
+        merged[model] = {
+            "code_ability": code_scores.get(model),
+            "hallucination": hallucination_scores.get(model),
+        }
+    return merged
 
 
 def _repo_relative_path(path: Path) -> str:

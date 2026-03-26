@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import telertLogo from "../../../assets/telert-logo.png";
+import telertLogo from "../../../assets/图片1.png";
 import { type Locale } from "@/lib/i18n";
 import { useI18n } from "@/components/common/LocaleProvider";
 
