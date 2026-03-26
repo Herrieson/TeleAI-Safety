@@ -82,6 +82,36 @@ export type RunMetricsSummaryResponse = {
   metric_summary: Record<string, unknown>;
 };
 
+export type RunMetricTask = {
+  task_id: string;
+  attack_run: string;
+  attack_group: string;
+  scorer: string;
+  total_samples: number | null;
+  skipped_samples: number | null;
+  attack_success_samples: number | null;
+  asr: number | null;
+  asr_strict: number | null;
+  asr_effective: number | null;
+  frr: number | null;
+  frr_invalid_rate: number | null;
+  report_path: string;
+  input_file: string;
+};
+
+export type RunMetricTasksResponse = {
+  run_id: string;
+  count: number;
+  tasks: RunMetricTask[];
+};
+
+export type RunMetricTaskReportResponse = {
+  run_id: string;
+  task_id: string;
+  filename: string;
+  content: string;
+};
+
 export type QuickAttackMethodsResponse = {
   count: number;
   methods: string[];
@@ -111,3 +141,30 @@ export type BenchmarkConfigOptionsResponse = {
   yaml_file_count: number;
   yaml_files: string[];
 };
+
+export type LeaderboardMetricBetter = "higher" | "lower" | "absolute_zero";
+export type LeaderboardMetricFormat = "number" | "percent";
+
+export type LeaderboardMetric = {
+  key: string;
+  label: string;
+  better: LeaderboardMetricBetter;
+  format: LeaderboardMetricFormat;
+  precision: number;
+};
+
+export type LeaderboardRow = {
+  model: string;
+  metrics: Record<string, number | null>;
+};
+
+export type LeaderboardResponse = {
+  generated_at: string;
+  source_csv: string;
+  source_updated_at: string;
+  model_count: number;
+  metric_count: number;
+  metrics: LeaderboardMetric[];
+  rows: LeaderboardRow[];
+};
+

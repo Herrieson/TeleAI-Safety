@@ -490,6 +490,7 @@ class OpenAIAdapter(ModelAdapter):
             or "not allowed" in lower
             or "invalid" in lower
             or "extra inputs are not permitted" in lower
+            or "unexpected keyword argument" in lower
         )
 
     def _normalize_api_mode(self, value: str) -> str:

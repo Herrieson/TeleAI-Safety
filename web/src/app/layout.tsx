@@ -1,47 +1,20 @@
 import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
-import telertLogo from "../../assets/telert-logo.png";
+import { AppShell } from "@/components/common/AppShell";
+import { LocaleProvider } from "@/components/common/LocaleProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TeleRT Runs Console",
-  description: "Web console for TeleRT pipeline runs"
+  title: "TeleRT 运行控制台 | Runs Console",
+  description: "TeleRT 红队流水线控制台 / TeleRT red team pipeline web console"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="zh-CN">
       <body>
-        <div className="shell">
-          <header className="topbar mb-6 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <Image alt="TeleRT logo" className="h-10 w-10 rounded-md object-contain" priority src={telertLogo} />
-              <div>
-                <p className="label mb-1">TeleRT</p>
-                <h1 className="title-gradient font-headline text-2xl font-semibold md:text-3xl">Runs Console</h1>
-                <p className="brand-subtitle">Red Team Pipeline Control Plane</p>
-                <div className="hud-strip mt-2">
-                  <span className="hud-pill hud-pill-live">
-                    <span className="refresh-dot" />
-                    Live Telemetry
-                  </span>
-                  <span className="hud-pill">AI Safety Ops</span>
-                  <span className="hud-pill">Human-in-the-loop</span>
-                </div>
-              </div>
-            </div>
-            <nav className="flex items-center gap-2 text-sm">
-              <Link className="btn" href="/runs">
-                Runs
-              </Link>
-              <Link className="btn btn-primary" href="/runs/new">
-                New Run
-              </Link>
-            </nav>
-          </header>
-          {children}
-        </div>
+        <LocaleProvider>
+          <AppShell>{children}</AppShell>
+        </LocaleProvider>
       </body>
     </html>
   );

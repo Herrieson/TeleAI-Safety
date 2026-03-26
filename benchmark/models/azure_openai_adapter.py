@@ -458,6 +458,11 @@ class AzureOpenAIAdapter(ModelAdapter):
             return True
         if "unsupported operation" in err_msg:
             return True
+        if (
+            "responses api is enabled only for api-version" in err_msg
+            and "later" in err_msg
+        ):
+            return True
         if "not supported" in err_msg and (
             "chatcompletion" in err_msg
             or "chat.completions" in err_msg
@@ -493,6 +498,7 @@ class AzureOpenAIAdapter(ModelAdapter):
             or "not allowed" in lower
             or "invalid" in lower
             or "extra inputs are not permitted" in lower
+            or "unexpected keyword argument" in lower
         )
 
     def _normalize_api_mode(self, value: str) -> str:

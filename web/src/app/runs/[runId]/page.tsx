@@ -6,8 +6,11 @@ import { useParams, useRouter } from "next/navigation";
 import { AnimatedNumber } from "@/components/common/AnimatedNumber";
 import { ArtifactTable } from "@/components/runs/ArtifactTable";
 import { MetricCards } from "@/components/runs/MetricCards";
+import { EvaluationTaskTable } from "@/components/runs/EvaluationTaskTable";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { StageTimeline } from "@/components/runs/StageTimeline";
+import { useI18n } from "@/components/common/LocaleProvider";
+import { formatRunMode, formatStageName } from "@/lib/i18n";
 import {
   ApiError,
   cancelRun,
@@ -15,13 +18,140 @@ import {
   getRun,
   getRunArtifacts,
   getRunLogs,
-  getRunMetricsSummary
+  getRunMetricTasks,
+  getRunMetricsSummary,
+  exportRunMetricTaskReport
 } from "@/lib/api";
-import type { Run, RunArtifactsResponse, RunCreatePayload, RunLogsResponse, RunMetricsSummaryResponse } from "@/lib/types";
+import type {
+  Run,
+  RunArtifactsResponse,
+  RunCreatePayload,
+  RunLogsResponse,
+  RunMetricTask,
+  RunMetricsSummaryResponse
+} from "@/lib/types";
 
 type DetailTab = "overview" | "logs" | "artifacts" | "metrics";
 
+function downloadTextFile(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function RunDetailPage() {
+  const { locale } = useI18n();
+  const text =
+    locale === "zh"
+      ? {
+          loadingRun: "正在加载任务...",
+          runNotFound: "未找到任务。",
+          runDetail: "任务详情",
+          executionTrace: "执行轨迹",
+          artifactGraph: "产物图谱",
+          monitor: "监控",
+          canceling: "取消中...",
+          cancel: "取消",
+          starting: "启动中...",
+          evaluateThisRun: "评估此任务",
+          back: "返回",
+          autoRefresh: "每 3 秒自动刷新。",
+          syncingStatus: "正在同步任务状态...",
+          stageSnapshot: "阶段快照",
+          totalStages: "总阶段数",
+          completed: "已完成",
+          failed: "失败",
+          config: "配置",
+          mode: "模式",
+          quickAttackMode: "快速攻击模式",
+          enabled: "启用",
+          disabled: "禁用",
+          targetModel: "目标模型",
+          openaiBaseUrl: "OpenAI Base URL",
+          quickMethods: "快速方法",
+          quickDataset: "快速数据集",
+          attackConfig: "攻击配置",
+          benchmarkConfig: "基准测试配置",
+          evalProfile: "评估配置",
+          resultsRoot: "结果根目录",
+          resultManifest: "结果清单",
+          stages: "阶段",
+          stage: "阶段",
+          tailLines: "尾部行数",
+          refreshing: "刷新中...",
+          refresh: "刷新",
+          syncingLogs: "正在同步日志...",
+          logPath: "日志路径",
+          noLogContent: "暂无日志内容。",
+          artifacts: "产物",
+          metricSummary: "指标汇总",
+          metricNeedEvaluate: "该任务未执行评估。点击“评估此任务”生成指标。",
+          noMetricSummary: "暂无指标汇总。",
+          tabs: {
+            overview: "概览",
+            logs: "日志",
+            artifacts: "产物",
+            metrics: "指标"
+          }
+        }
+      : {
+          loadingRun: "Loading run...",
+          runNotFound: "Run not found.",
+          runDetail: "Run Detail",
+          executionTrace: "Execution Trace",
+          artifactGraph: "Artifact Graph",
+          monitor: "Monitor",
+          canceling: "Canceling...",
+          cancel: "Cancel",
+          starting: "Starting...",
+          evaluateThisRun: "Evaluate This Run",
+          back: "Back",
+          autoRefresh: "Auto refresh every 3s.",
+          syncingStatus: "syncing run status...",
+          stageSnapshot: "Stage Snapshot",
+          totalStages: "Total Stages",
+          completed: "Completed",
+          failed: "Failed",
+          config: "Config",
+          mode: "Mode",
+          quickAttackMode: "Quick Attack Mode",
+          enabled: "enabled",
+          disabled: "disabled",
+          targetModel: "Target Model",
+          openaiBaseUrl: "OpenAI Base URL",
+          quickMethods: "Quick Methods",
+          quickDataset: "Quick Dataset",
+          attackConfig: "Attack Config",
+          benchmarkConfig: "Benchmark Config",
+          evalProfile: "Eval Profile",
+          resultsRoot: "Results Root",
+          resultManifest: "Result Manifest",
+          stages: "Stages",
+          stage: "Stage",
+          tailLines: "Tail Lines",
+          refreshing: "Refreshing...",
+          refresh: "Refresh",
+          syncingLogs: "syncing logs...",
+          logPath: "Log Path",
+          noLogContent: "No log content.",
+          artifacts: "Artifacts",
+          metricSummary: "Metric Summary",
+          metricNeedEvaluate: 'This run did not execute evaluate. Click "Evaluate This Run" to generate metrics.',
+          noMetricSummary: "No metric summary generated yet.",
+          tabs: {
+            overview: "overview",
+            logs: "logs",
+            artifacts: "artifacts",
+            metrics: "metrics"
+          }
+        };
+
   const params = useParams<{ runId: string }>();
   const router = useRouter();
   const runId = params.runId;
@@ -33,6 +163,9 @@ export default function RunDetailPage() {
   const [logs, setLogs] = useState<RunLogsResponse | null>(null);
   const [artifacts, setArtifacts] = useState<RunArtifactsResponse | null>(null);
   const [metrics, setMetrics] = useState<RunMetricsSummaryResponse | null>(null);
+  const [metricTasks, setMetricTasks] = useState<RunMetricTask[]>([]);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [exportingTaskId, setExportingTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [runRefreshing, setRunRefreshing] = useState(false);
   const [logsRefreshing, setLogsRefreshing] = useState(false);
@@ -110,13 +243,17 @@ export default function RunDetailPage() {
   }, [runId]);
 
   const loadMetrics = useCallback(async () => {
+    setMetricsLoading(true);
     try {
-      const row = await getRunMetricsSummary(runId);
-      setMetrics(row);
+      const [summaryRow, tasksRow] = await Promise.all([getRunMetricsSummary(runId), getRunMetricTasks(runId)]);
+      setMetrics(summaryRow);
+      setMetricTasks(tasksRow.tasks || []);
       setError("");
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err);
       setError(message);
+    } finally {
+      setMetricsLoading(false);
     }
   }, [runId]);
 
@@ -217,10 +354,25 @@ export default function RunDetailPage() {
     }
   }
 
+  async function handleExportMetricTask(taskId: string) {
+    setExportingTaskId(taskId);
+    try {
+      const report = await exportRunMetricTaskReport(runId, taskId);
+      const filename = report.filename?.trim() || "eval-task-" + runId + "-" + taskId + ".md";
+      downloadTextFile(filename, report.content || "");
+      setError("");
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err);
+      setError(message);
+    } finally {
+      setExportingTaskId(null);
+    }
+  }
+
   if (loading) {
     return (
       <section className="panel p-6">
-        <p className="text-sm text-slate-600">Loading run...</p>
+        <p className="text-sm text-slate-600">{text.loadingRun}</p>
       </section>
     );
   }
@@ -228,7 +380,7 @@ export default function RunDetailPage() {
   if (!run) {
     return (
       <section className="panel p-6">
-        <p className="text-sm text-rose-700">{error || "Run not found."}</p>
+        <p className="text-sm text-rose-700">{error || text.runNotFound}</p>
       </section>
     );
   }
@@ -238,15 +390,15 @@ export default function RunDetailPage() {
       <div className="panel p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="label mb-1">Run Detail</p>
+            <p className="label mb-1">{text.runDetail}</p>
             <h2 className="title-gradient font-headline text-2xl font-semibold">{run.name}</h2>
             <p className="mono mt-2 text-xs text-slate-600">{run.run_id}</p>
             <div className="hud-strip mt-2">
-              <span className="hud-pill">Execution Trace</span>
-              <span className="hud-pill">Artifact Graph</span>
+              <span className="hud-pill">{text.executionTrace}</span>
+              <span className="hud-pill">{text.artifactGraph}</span>
               <span className="hud-pill hud-pill-live">
                 <span className="refresh-dot" />
-                Monitor
+                {text.monitor}
               </span>
             </div>
           </div>
@@ -254,7 +406,7 @@ export default function RunDetailPage() {
             <RunStatusBadge status={run.status} />
             {isRunning ? (
               <button className={runRefreshing ? "btn btn-busy" : "btn"} disabled={runRefreshing} onClick={() => void handleCancel()} type="button">
-                {runRefreshing ? "Canceling..." : "Cancel"}
+                {runRefreshing ? text.canceling : text.cancel}
               </button>
             ) : null}
             {canEvaluateFromRun ? (
@@ -268,21 +420,21 @@ export default function RunDetailPage() {
                   <option value="smoke">smoke</option>
                 </select>
                 <button className="btn" disabled={startingEvaluate} onClick={() => void handleEvaluateFromRun()} type="button">
-                  {startingEvaluate ? "Starting..." : "Evaluate This Run"}
+                  {startingEvaluate ? text.starting : text.evaluateThisRun}
                 </button>
               </>
             ) : null}
             <Link className="btn" href="/runs">
-              Back
+              {text.back}
             </Link>
           </div>
         </div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-slate-600">Auto refresh every 3s.</p>
+          <p className="text-xs text-slate-600">{text.autoRefresh}</p>
           {runRefreshing ? (
             <p className="inline-flex items-center gap-2 text-xs text-emerald-700">
               <span className="refresh-dot" />
-              syncing run status...
+              {text.syncingStatus}
             </p>
           ) : null}
         </div>
@@ -304,7 +456,7 @@ export default function RunDetailPage() {
               onClick={() => setTab(item)}
               type="button"
             >
-              {item}
+              {text.tabs[item]}
             </button>
           ))}
         </div>
@@ -313,22 +465,22 @@ export default function RunDetailPage() {
       {tab === "overview" ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <article className="panel p-4 lg:col-span-3">
-            <p className="label mb-2">Stage Snapshot</p>
+            <p className="label mb-2">{text.stageSnapshot}</p>
             <div className="stat-grid reveal-grid">
               <article className="stat-card">
-                <p className="label mb-2">Total Stages</p>
+                <p className="label mb-2">{text.totalStages}</p>
                 <p className="stat-value">
                   <AnimatedNumber value={stageStats.total} />
                 </p>
               </article>
               <article className="stat-card">
-                <p className="label mb-2">Completed</p>
+                <p className="label mb-2">{text.completed}</p>
                 <p className="stat-value">
                   <AnimatedNumber value={stageStats.done} />
                 </p>
               </article>
               <article className="stat-card">
-                <p className="label mb-2">Failed</p>
+                <p className="label mb-2">{text.failed}</p>
                 <p className="stat-value">
                   <AnimatedNumber value={stageStats.failed} />
                 </p>
@@ -336,56 +488,56 @@ export default function RunDetailPage() {
             </div>
           </article>
           <article className="panel p-4 lg:col-span-1">
-            <p className="label mb-2">Config</p>
+            <p className="label mb-2">{text.config}</p>
             <dl className="space-y-2 text-sm">
               <div>
-                <dt className="label">Mode</dt>
-                <dd>{run.mode}</dd>
+                <dt className="label">{text.mode}</dt>
+                <dd>{formatRunMode(run.mode, locale)}</dd>
               </div>
               <div>
-                <dt className="label">Quick Attack Mode</dt>
-                <dd>{run.quick_attack_enabled ? "enabled" : "disabled"}</dd>
+                <dt className="label">{text.quickAttackMode}</dt>
+                <dd>{run.quick_attack_enabled ? text.enabled : text.disabled}</dd>
               </div>
               <div>
-                <dt className="label">Target Model</dt>
+                <dt className="label">{text.targetModel}</dt>
                 <dd>{run.quick_target_model_name || "-"}</dd>
               </div>
               <div>
-                <dt className="label">OpenAI Base URL</dt>
+                <dt className="label">{text.openaiBaseUrl}</dt>
                 <dd className="mono text-xs">{run.quick_openai_base_url || "-"}</dd>
               </div>
               <div>
-                <dt className="label">Quick Methods</dt>
+                <dt className="label">{text.quickMethods}</dt>
                 <dd className="mono text-xs">{run.quick_attack_methods?.join(", ") || "-"}</dd>
               </div>
               <div>
-                <dt className="label">Quick Dataset</dt>
+                <dt className="label">{text.quickDataset}</dt>
                 <dd className="mono text-xs">{run.quick_dataset_key || "-"}</dd>
               </div>
               <div>
-                <dt className="label">Attack Config</dt>
+                <dt className="label">{text.attackConfig}</dt>
                 <dd className="mono text-xs">{run.attack_config_dir || "-"}</dd>
               </div>
               <div>
-                <dt className="label">Benchmark Config</dt>
+                <dt className="label">{text.benchmarkConfig}</dt>
                 <dd className="mono text-xs">{run.benchmark_config_path || "-"}</dd>
               </div>
               <div>
-                <dt className="label">Eval Profile</dt>
+                <dt className="label">{text.evalProfile}</dt>
                 <dd>{run.eval_profile || "-"}</dd>
               </div>
               <div>
-                <dt className="label">Results Root</dt>
+                <dt className="label">{text.resultsRoot}</dt>
                 <dd className="mono text-xs">{run.results_root}</dd>
               </div>
               <div>
-                <dt className="label">Result Manifest</dt>
+                <dt className="label">{text.resultManifest}</dt>
                 <dd className="mono text-xs">{run.result_manifest || "-"}</dd>
               </div>
             </dl>
           </article>
           <article className="panel p-4 lg:col-span-2">
-            <p className="label mb-3">Stages</p>
+            <p className="label mb-3">{text.stages}</p>
             <StageTimeline stages={run.stages} />
           </article>
         </div>
@@ -395,7 +547,7 @@ export default function RunDetailPage() {
         <article className="panel p-4">
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <label className="label" htmlFor="stageSelector">
-              Stage
+              {text.stage}
             </label>
             <select
               className="select w-[180px]"
@@ -405,12 +557,12 @@ export default function RunDetailPage() {
             >
               {stageOptions.map((stageName) => (
                 <option key={stageName} value={stageName}>
-                  {stageName}
+                  {formatStageName(stageName, locale)}
                 </option>
               ))}
             </select>
             <label className="label" htmlFor="tailLines">
-              Tail Lines
+              {text.tailLines}
             </label>
             <select
               className="select w-[140px]"
@@ -424,40 +576,42 @@ export default function RunDetailPage() {
               <option value={1000}>1000</option>
             </select>
             <button className={logsRefreshing ? "btn btn-busy" : "btn"} disabled={logsRefreshing} onClick={() => void loadLogs(true)} type="button">
-              {logsRefreshing ? "Refreshing..." : "Refresh"}
+              {logsRefreshing ? text.refreshing : text.refresh}
             </button>
             {logsRefreshing ? (
               <p aria-live="polite" className="inline-flex items-center gap-2 text-xs text-emerald-700">
                 <span className="refresh-dot" />
-                syncing logs...
+                {text.syncingLogs}
               </p>
             ) : null}
           </div>
-          <p className="label mb-2">Log Path</p>
+          <p className="label mb-2">{text.logPath}</p>
           <p className="mono mb-3 text-xs text-slate-700">{logs?.log_path || "-"}</p>
           <pre className="log-console mono text-xs leading-5">
-            {logs?.content || "No log content."}
+            {logs?.content || text.noLogContent}
           </pre>
         </article>
       ) : null}
 
       {tab === "artifacts" ? (
         <article className="panel p-4">
-          <p className="label mb-3">Artifacts</p>
+          <p className="label mb-3">{text.artifacts}</p>
           <ArtifactTable artifacts={artifacts?.artifacts || []} />
         </article>
       ) : null}
 
       {tab === "metrics" ? (
         <article className="panel p-4">
-          <p className="label mb-3">Metric Summary</p>
+          <p className="label mb-3">{text.metricSummary}</p>
           <MetricCards
-            emptyMessage={
-              run.mode === "attack_only"
-                ? 'This run did not execute evaluate. Click "Evaluate This Run" to generate metrics.'
-                : "No metric summary generated yet."
-            }
+            emptyMessage={run.mode === "attack_only" ? text.metricNeedEvaluate : text.noMetricSummary}
             summary={metrics?.metric_summary || run.metric_summary || {}}
+          />
+          <EvaluationTaskTable
+            exportingTaskId={exportingTaskId}
+            loading={metricsLoading}
+            onExport={(taskId) => void handleExportMetricTask(taskId)}
+            tasks={metricTasks}
           />
         </article>
       ) : null}

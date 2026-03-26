@@ -11,6 +11,9 @@ import {
   getQuickAttackMethods,
   getRuns
 } from "@/lib/api";
+import { useI18n } from "@/components/common/LocaleProvider";
+import { formatRunMode, formatStageName } from "@/lib/i18n";
+import { getAttackMethodInfo } from "@/lib/attackMethodInfo";
 import type { QuickAttackDataset, Run, RunCreatePayload, RunMode } from "@/lib/types";
 
 const fallbackMethodOptions = [
@@ -33,21 +36,29 @@ const defaultPayload: RunCreatePayload = {
   results_root: "data/attack_results",
   result_manifest: "",
   quick_attack_enabled: true,
-  quick_target_model_name: "gpt-4o-mini",
+  quick_target_model_name: "",
   quick_openai_base_url: "",
   quick_openai_api_key: "",
   quick_attack_methods: ["pair", "cipher", "rene"],
   quick_dataset_key: "teleai_samples_500_500"
 };
 
-const runModeOptions: { value: RunMode; label: string }[] = [
-  { value: "attack_only", label: "Attack Only" },
-  { value: "eval_only", label: "Eval Only" },
-  { value: "full_pipeline", label: "Full Pipeline" },
-  { value: "benchmark_only", label: "Benchmark Only" }
-];
+const runModeOptions: RunMode[] = ["attack_only", "eval_only", "full_pipeline", "benchmark_only"];
 
-function modeSubmitLabel(mode: RunMode): string {
+function modeSubmitLabel(mode: RunMode, locale: "zh" | "en"): string {
+  if (locale === "zh") {
+    if (mode === "attack_only") {
+      return "启动攻击任务";
+    }
+    if (mode === "eval_only") {
+      return "启动评估任务";
+    }
+    if (mode === "benchmark_only") {
+      return "启动基准测试任务";
+    }
+    return "启动完整流水线";
+  }
+
   if (mode === "attack_only") {
     return "Start Attack Run";
   }
@@ -61,6 +72,180 @@ function modeSubmitLabel(mode: RunMode): string {
 }
 
 export default function NewRunPage() {
+  const { locale } = useI18n();
+  const text =
+    locale === "zh"
+      ? {
+          runsConsole: "运行控制台",
+          newRun: "新建任务",
+          pageDesc: "选择模式和输入项。攻击/评估输出会按 run id 在后端隔离。",
+          missionBuilder: "任务编排",
+          pipelineComposer: "流水线编辑器",
+          ready: "就绪",
+          loadingConfig: "正在加载最新配置选项...",
+          basicSetup: "基础设置",
+          runNameOptional: "任务名称（可选）",
+          mode: "模式",
+          attackSettings: "攻击设置",
+          quickAttack: "快速攻击",
+          targetModelName: "目标模型名称",
+          dataset: "数据集",
+          unavailable: "不可用",
+          targetApiCreds: "目标 API 凭证",
+          requiredForBenchmark: "（基准测试必填）",
+          optional: "（可选）",
+          openaiBaseUrl: "OpenAI Base URL",
+          openaiApiKey: "OpenAI API Key",
+          attackMethods: "攻击方法",
+          selected: "已选",
+          selectAll: "全选",
+          clear: "清空",
+          methodIntro: "简介",
+          methodPaper: "论文",
+          methodRepo: "源码",
+          methodNoRef: "暂无公开链接",
+          simpleMode: "简洁模式",
+          advancedMode: "高级模式",
+          simpleModeTitle: "一键完整测试（默认）",
+          simpleModeDesc: "需填写目标模型名称和 API 凭证，系统将自动执行攻击 + 基准测试 + 评估完整流程。",
+          simpleAutoPlanTitle: "自动测试计划",
+          simpleAutoMode: "运行模式",
+          simpleAutoStages: "执行阶段",
+          simpleAutoDataset: "数据集",
+          simpleAutoMethods: "攻击方法",
+          simpleAutoBenchmark: "基准配置",
+          simpleAutoEval: "评估配置",
+          simpleSubmit: "开始自动完整测试",
+          errSimpleTargetModel: "请先填写目标模型名称。",
+          errSimpleCreds: "请先填写 API Base URL 和 API Key。",
+          attackConfigPath: "攻击配置路径（目录或 .yaml）",
+          attackConfigHelp: "目录会运行其中所有 yaml；单个 yaml 路径只运行一个方法。",
+          benchmarkSettings: "基准测试设置",
+          benchmarkConfigPath: "基准测试配置路径",
+          benchmarkConfigFile: "基准测试配置文件",
+          selectBenchmarkConfigFile: "选择基准测试配置文件",
+          skipBenchmarkStage: "跳过基准测试阶段",
+          manualBenchmarkConfigPath: "手动输入基准测试配置路径",
+          targetOpenaiBaseUrl: "目标 OpenAI Base URL",
+          targetOpenaiApiKey: "目标 OpenAI API Key",
+          benchmarkReuseHint: "完整流水线模式下，基准测试将复用攻击部分的目标模型设置。",
+          runtimeConfigHint: "运行时配置由模板生成；benchmark 顶层模型会自动绑定到目标模型。",
+          evaluateSettings: "评估设置",
+          evalProfile: "评估配置",
+          resultsRoot: "结果根目录",
+          useExistingRunManifest: "使用已有任务的清单（可选）",
+          manualManifestPath: "手动填写清单路径",
+          resultManifestPath: "结果清单路径",
+          resultManifestPathOptional: "结果清单路径（可选）",
+          leaveEmptyManifest: "留空则使用本次任务的攻击输出",
+          submitting: "提交中...",
+          preparing: "准备中...",
+          reset: "重置",
+          runPreview: "任务预览",
+          stages: "阶段",
+          targetModel: "目标模型",
+          attackMethodsCount: "攻击方法",
+          benchmarkConfig: "基准测试配置",
+          checklist: "检查清单",
+          formLooksGood: "表单检查通过，可以启动。",
+          isolationHint: "产物和中间输出按 run id 隔离，避免跨任务污染。",
+          warnSelectMethod: "请至少选择一个攻击方法。",
+          warnBenchmarkCreds: "执行基准测试需要目标模型 base_url 和 api_key。",
+          warnEvalManifest: "仅评估模式需要提供清单。",
+          errModelNameQuick: "快速攻击模式下必须填写模型名称。",
+          errDatasetQuick: "快速攻击模式下必须选择数据集。",
+          errAttackConfig: "关闭快速攻击时必须填写攻击配置路径。",
+          errBenchmarkConfig: "benchmark_only 模式必须填写基准测试配置路径。",
+          errTargetModelBenchmark: "启用 benchmark 阶段时必须填写目标模型名称。",
+          errTargetCredsBenchmark: "启用 benchmark 阶段时必须填写目标模型 base_url 和 api_key。",
+          errResultManifest: "eval_only 模式必须填写结果清单。"
+        }
+      : {
+          runsConsole: "Runs Console",
+          newRun: "New Run",
+          pageDesc: "Choose mode and inputs. Attack/evaluate outputs are isolated by run id on backend.",
+          missionBuilder: "Mission Builder",
+          pipelineComposer: "Pipeline Composer",
+          ready: "Ready",
+          loadingConfig: "loading latest config options...",
+          basicSetup: "Basic Setup",
+          runNameOptional: "Run Name (optional)",
+          mode: "Mode",
+          attackSettings: "Attack Settings",
+          quickAttack: "Quick Attack",
+          targetModelName: "Target Model Name",
+          dataset: "Dataset",
+          unavailable: "unavailable",
+          targetApiCreds: "Target API Credentials",
+          requiredForBenchmark: "(required for benchmark)",
+          optional: "(optional)",
+          openaiBaseUrl: "OpenAI Base URL",
+          openaiApiKey: "OpenAI API Key",
+          attackMethods: "Attack Methods",
+          selected: "selected",
+          selectAll: "Select All",
+          clear: "Clear",
+          methodIntro: "Intro",
+          methodPaper: "Paper",
+          methodRepo: "Source",
+          methodNoRef: "No public links",
+          simpleMode: "Simple",
+          advancedMode: "Advanced",
+          simpleModeTitle: "One-click Full Test (Default)",
+          simpleModeDesc: "Target model name and API credentials are required. The system will run attack + benchmark + evaluate automatically.",
+          simpleAutoPlanTitle: "Auto Test Plan",
+          simpleAutoMode: "Run Mode",
+          simpleAutoStages: "Stages",
+          simpleAutoDataset: "Dataset",
+          simpleAutoMethods: "Attack Methods",
+          simpleAutoBenchmark: "Benchmark Config",
+          simpleAutoEval: "Eval Profile",
+          simpleSubmit: "Start Auto Full Test",
+          errSimpleTargetModel: "Please provide target model name.",
+          errSimpleCreds: "Please provide API Base URL and API Key.",
+          attackConfigPath: "Attack Config Path (directory or .yaml)",
+          attackConfigHelp: "Use a directory to run all yaml files, or a single yaml path to run one method.",
+          benchmarkSettings: "Benchmark Settings",
+          benchmarkConfigPath: "Benchmark Config Path",
+          benchmarkConfigFile: "Benchmark Config File",
+          selectBenchmarkConfigFile: "Select benchmark config file",
+          skipBenchmarkStage: "Skip benchmark stage",
+          manualBenchmarkConfigPath: "Manual benchmark config path",
+          targetOpenaiBaseUrl: "Target OpenAI Base URL",
+          targetOpenaiApiKey: "Target OpenAI API Key",
+          benchmarkReuseHint: "Benchmark will reuse target model settings from Attack section in full pipeline mode.",
+          runtimeConfigHint: "Runtime config is generated from template; top-level benchmark model is auto-bound to target model.",
+          evaluateSettings: "Evaluate Settings",
+          evalProfile: "Eval Profile",
+          resultsRoot: "Results Root",
+          useExistingRunManifest: "Use Existing Run Manifest (optional)",
+          manualManifestPath: "Manual manifest path",
+          resultManifestPath: "Result Manifest Path",
+          resultManifestPathOptional: "Result Manifest Path (optional)",
+          leaveEmptyManifest: "Leave empty to use this run's attack outputs",
+          submitting: "Submitting...",
+          preparing: "Preparing...",
+          reset: "Reset",
+          runPreview: "Run Preview",
+          stages: "Stages",
+          targetModel: "Target Model",
+          attackMethodsCount: "Attack Methods",
+          benchmarkConfig: "Benchmark Config",
+          checklist: "Checklist",
+          formLooksGood: "Form looks good. Ready to start.",
+          isolationHint: "Artifacts and intermediate outputs are isolated by run id, avoiding cross-run pollution.",
+          warnSelectMethod: "Select at least one attack method.",
+          warnBenchmarkCreds: "Benchmark needs target model base_url and api_key.",
+          warnEvalManifest: "Eval-only mode requires a manifest.",
+          errModelNameQuick: "Model name is required in quick attack mode.",
+          errDatasetQuick: "Dataset is required in quick attack mode.",
+          errAttackConfig: "Attack config path is required when quick attack is disabled.",
+          errBenchmarkConfig: "Benchmark config path is required in benchmark_only mode.",
+          errTargetModelBenchmark: "Target model name is required when benchmark stage is enabled.",
+          errTargetCredsBenchmark: "Target model base_url and api_key are required when benchmark stage is enabled.",
+          errResultManifest: "Result manifest is required in eval_only mode."
+        };
+
   const router = useRouter();
   const [payload, setPayload] = useState<RunCreatePayload>(defaultPayload);
   const [submitting, setSubmitting] = useState(false);
@@ -83,8 +268,9 @@ export default function NewRunPage() {
     "configs/gpt-5",
     "configs/gpt-4o"
   ]);
-  const [benchmarkConfigOptions, setBenchmarkConfigOptions] = useState<string[]>(["benchmark/configs/example.yaml"]);
+  const [benchmarkConfigOptions, setBenchmarkConfigOptions] = useState<string[]>(["benchmark/configs/run.yaml"]);
   const [benchmarkManualPathEnabled, setBenchmarkManualPathEnabled] = useState(false);
+  const [simpleMode, setSimpleMode] = useState(true);
 
   useEffect(() => {
     let alive = true;
@@ -183,31 +369,55 @@ export default function NewRunPage() {
   const stagePreview = useMemo(() => {
     const rows: string[] = [];
     if (isAttackMode) {
-      rows.push("attack");
+      rows.push(formatStageName("attack", locale));
     }
     if (benchmarkWillRun) {
-      rows.push("benchmark");
+      rows.push(formatStageName("benchmark", locale));
     } else if (isBenchmarkMode) {
-      rows.push("benchmark (skipped)");
+      rows.push(
+        locale === "zh"
+          ? `${formatStageName("benchmark", locale)}（跳过）`
+          : `${formatStageName("benchmark", locale)} (skipped)`
+      );
     }
     if (isEvaluateMode) {
-      rows.push("evaluate");
+      rows.push(formatStageName("evaluate", locale));
     }
     return rows;
-  }, [benchmarkWillRun, isAttackMode, isBenchmarkMode, isEvaluateMode]);
+  }, [benchmarkWillRun, isAttackMode, isBenchmarkMode, isEvaluateMode, locale]);
+  const autoDatasetKey = useMemo(
+    () => datasetOptions[0]?.key || payload.quick_dataset_key || "teleai_samples_500_500",
+    [datasetOptions, payload.quick_dataset_key]
+  );
+  const autoBenchmarkConfigPath = useMemo(
+    () => benchmarkConfigOptions[0] || payload.benchmark_config_path || "benchmark/configs/run.yaml",
+    [benchmarkConfigOptions, payload.benchmark_config_path]
+  );
+  const autoMethodList = useMemo(
+    () => (methodOptions.length ? methodOptions : fallbackMethodOptions),
+    [methodOptions]
+  );
+  const autoStageSummary = useMemo(
+    () => [
+      formatStageName("attack", locale),
+      formatStageName("benchmark", locale),
+      formatStageName("evaluate", locale)
+    ].join(" -> "),
+    [locale]
+  );
   const previewWarnings = useMemo(() => {
     const hints: string[] = [];
     if (isAttackMode && payload.quick_attack_enabled && !payload.quick_attack_methods.length) {
-      hints.push("Select at least one attack method.");
+      hints.push(text.warnSelectMethod);
     }
     if (benchmarkWillRun && (!payload.quick_openai_base_url.trim() || !payload.quick_openai_api_key.trim())) {
-      hints.push("Benchmark needs target model base_url and api_key.");
+      hints.push(text.warnBenchmarkCreds);
     }
     if (
       payload.mode === "eval_only" &&
       !(selectedManifestSourceRun?.result_manifest?.trim() || payload.result_manifest.trim())
     ) {
-      hints.push("Eval-only mode requires a manifest.");
+      hints.push(text.warnEvalManifest);
     }
     return hints;
   }, [
@@ -219,7 +429,8 @@ export default function NewRunPage() {
     payload.quick_openai_api_key,
     payload.quick_openai_base_url,
     payload.result_manifest,
-    selectedManifestSourceRun
+    selectedManifestSourceRun,
+    text
   ]);
 
   function toggleMethod(method: string) {
@@ -236,6 +447,45 @@ export default function NewRunPage() {
     event.preventDefault();
     setError("");
 
+    if (simpleMode) {
+      if (!payload.quick_target_model_name.trim()) {
+        setError(text.errSimpleTargetModel);
+        return;
+      }
+      if (!payload.quick_openai_base_url.trim() || !payload.quick_openai_api_key.trim()) {
+        setError(text.errSimpleCreds);
+        return;
+      }
+
+      const submitPayload: RunCreatePayload = {
+        ...payload,
+        mode: "full_pipeline",
+        attack_config_dir: "__AUTO__",
+        benchmark_config_path: autoBenchmarkConfigPath,
+        eval_profile: "full",
+        result_manifest: "",
+        results_root: payload.results_root.trim() || "data/attack_results",
+        quick_attack_enabled: true,
+        quick_openai_base_url: payload.quick_openai_base_url.trim(),
+        quick_openai_api_key: payload.quick_openai_api_key.trim(),
+        quick_target_model_name: payload.quick_target_model_name.trim(),
+        quick_attack_methods: [...autoMethodList],
+        quick_dataset_key: autoDatasetKey
+      };
+
+      setSubmitting(true);
+      try {
+        const run = await createRun(submitPayload);
+        router.push(`/runs/${run.run_id}`);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err);
+        setError(message);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     const effectiveResultManifest =
       payload.mode === "eval_only" && selectedManifestSourceRun
         ? selectedManifestSourceRun.result_manifest
@@ -244,41 +494,41 @@ export default function NewRunPage() {
     if (isAttackMode) {
       if (payload.quick_attack_enabled) {
         if (!payload.quick_target_model_name.trim()) {
-          setError("Model name is required in quick attack mode.");
+          setError(text.errModelNameQuick);
           return;
         }
         if (!payload.quick_dataset_key.trim()) {
-          setError("Dataset is required in quick attack mode.");
+          setError(text.errDatasetQuick);
           return;
         }
         if (!payload.quick_attack_methods.length) {
-          setError("Select at least one attack method.");
+          setError(text.warnSelectMethod);
           return;
         }
       } else if (!payload.attack_config_dir.trim()) {
-        setError("Attack config path is required when quick attack is disabled.");
+        setError(text.errAttackConfig);
         return;
       }
     }
 
     if (payload.mode === "benchmark_only" && !payload.benchmark_config_path.trim()) {
-      setError("Benchmark config path is required in benchmark_only mode.");
+      setError(text.errBenchmarkConfig);
       return;
     }
 
     if (benchmarkWillRun) {
       if (!payload.quick_target_model_name.trim()) {
-        setError("Target model name is required when benchmark stage is enabled.");
+        setError(text.errTargetModelBenchmark);
         return;
       }
       if (!payload.quick_openai_base_url.trim() || !payload.quick_openai_api_key.trim()) {
-        setError("Target model base_url and api_key are required when benchmark stage is enabled.");
+        setError(text.errTargetCredsBenchmark);
         return;
       }
     }
 
     if (payload.mode === "eval_only" && !effectiveResultManifest.trim()) {
-      setError("Result manifest is required in eval_only mode.");
+      setError(text.errResultManifest);
       return;
     }
 
@@ -315,35 +565,172 @@ export default function NewRunPage() {
   return (
     <section className="panel p-6">
       <div className="mb-5">
-        <p className="label">Runs Console</p>
-        <h2 className="title-gradient font-headline text-2xl font-semibold">New Run</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Choose mode and inputs. Attack/evaluate outputs are isolated by run id on backend.
-        </p>
+        <p className="label">{text.runsConsole}</p>
+        <h2 className="title-gradient font-headline text-2xl font-semibold">{text.newRun}</h2>
+        <p className="mt-2 text-sm text-slate-600">{text.pageDesc}</p>
         <div className="hud-strip mt-2">
-          <span className="hud-pill">Mission Builder</span>
-          <span className="hud-pill">Pipeline Composer</span>
+          <span className="hud-pill">{text.missionBuilder}</span>
+          <span className="hud-pill">{text.pipelineComposer}</span>
           <span className="hud-pill hud-pill-live">
             <span className="refresh-dot" />
-            Ready
+            {text.ready}
           </span>
         </div>
       </div>
       {initializing ? (
         <p aria-live="polite" className="notice mb-4 inline-flex items-center gap-2 text-slate-700">
           <span className="refresh-dot" />
-          loading latest config options...
+          {text.loadingConfig}
         </p>
       ) : null}
 
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          className={simpleMode ? "btn btn-primary" : "btn"}
+          onClick={() => {
+            setSimpleMode(true);
+            setError("");
+          }}
+          type="button"
+        >
+          {text.simpleMode}
+        </button>
+        <button
+          className={!simpleMode ? "btn btn-primary" : "btn"}
+          onClick={() => {
+            setSimpleMode(false);
+            setError("");
+          }}
+          type="button"
+        >
+          {text.advancedMode}
+        </button>
+      </div>
+
       <form aria-busy={submitting || initializing} onSubmit={onSubmit}>
+        {simpleMode ? (
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <div className="space-y-5 xl:col-span-8 reveal-grid">
+              <article className="section-card">
+                <p className="label mb-3">{text.simpleModeTitle}</p>
+                <p className="mb-4 text-sm text-slate-600">{text.simpleModeDesc}</p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <label>
+                    <span className="label mb-1 block">{text.targetModelName}</span>
+                    <input
+                      className="input"
+                      onChange={(event) =>
+                        setPayload((prev) => ({
+                          ...prev,
+                          quick_target_model_name: event.target.value
+                        }))
+                      }
+                      placeholder="gpt-4o-mini"
+                      value={payload.quick_target_model_name}
+                    />
+                  </label>
+                  <label>
+                    <span className="label mb-1 block">{text.openaiBaseUrl}</span>
+                    <input
+                      className="input mono"
+                      onChange={(event) =>
+                        setPayload((prev) => ({
+                          ...prev,
+                          quick_openai_base_url: event.target.value
+                        }))
+                      }
+                      placeholder="https://api.openai.com/v1"
+                      value={payload.quick_openai_base_url}
+                    />
+                  </label>
+                  <label>
+                    <span className="label mb-1 block">{text.openaiApiKey}</span>
+                    <input
+                      className="input mono"
+                      onChange={(event) =>
+                        setPayload((prev) => ({
+                          ...prev,
+                          quick_openai_api_key: event.target.value
+                        }))
+                      }
+                      placeholder="sk-..."
+                      type="password"
+                      value={payload.quick_openai_api_key}
+                    />
+                  </label>
+                </div>
+              </article>
+
+              {error ? (
+                <p aria-live="assertive" className="notice notice-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button className={submitting ? "btn btn-primary btn-busy" : "btn btn-primary"} disabled={submitting || initializing} type="submit">
+                  {submitting ? text.submitting : initializing ? text.preparing : text.simpleSubmit}
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setPayload(defaultPayload);
+                    setManifestSourceRunId("");
+                    setBenchmarkManualPathEnabled(false);
+                    setSimpleMode(true);
+                    setError("");
+                  }}
+                  type="button"
+                >
+                  {text.reset}
+                </button>
+              </div>
+            </div>
+
+            <aside className="space-y-4 xl:col-span-4 xl:sticky xl:top-6 xl:self-start reveal-grid">
+              <article className="stat-card">
+                <p className="label mb-2">{text.simpleAutoPlanTitle}</p>
+                <dl className="space-y-2 text-sm text-slate-700">
+                  <div>
+                    <dt className="label">{text.simpleAutoMode}</dt>
+                    <dd>{formatRunMode("full_pipeline", locale)}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoStages}</dt>
+                    <dd className="mono text-xs">{autoStageSummary}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.targetModel}</dt>
+                    <dd>{payload.quick_target_model_name || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoDataset}</dt>
+                    <dd className="mono text-xs">{autoDatasetKey}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoMethods}</dt>
+                    <dd>{autoMethodList.length}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoBenchmark}</dt>
+                    <dd className="mono text-xs">{autoBenchmarkConfigPath}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoEval}</dt>
+                    <dd>full</dd>
+                  </div>
+                </dl>
+              </article>
+            </aside>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
           <div className="space-y-5 xl:col-span-8 reveal-grid">
             <article className="section-card">
-              <p className="label mb-3">Basic Setup</p>
+              <p className="label mb-3">{text.basicSetup}</p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label>
-                  <span className="label mb-1 block">Run Name (optional)</span>
+                  <span className="label mb-1 block">{text.runNameOptional}</span>
                   <input
                     className="input"
                     onChange={(event) => setPayload((prev) => ({ ...prev, name: event.target.value }))}
@@ -352,7 +739,7 @@ export default function NewRunPage() {
                   />
                 </label>
                 <label>
-                  <span className="label mb-1 block">Mode</span>
+                  <span className="label mb-1 block">{text.mode}</span>
                   <select
                     className="select"
                     onChange={(event) => {
@@ -370,8 +757,8 @@ export default function NewRunPage() {
                     value={payload.mode}
                   >
                     {runModeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
+                      <option key={option} value={option}>
+                        {formatRunMode(option, locale)}
                       </option>
                     ))}
                   </select>
@@ -382,7 +769,7 @@ export default function NewRunPage() {
             {isAttackMode ? (
               <article className="section-card">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <p className="label">Attack Settings</p>
+                  <p className="label">{text.attackSettings}</p>
                   <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input
                       checked={payload.quick_attack_enabled}
@@ -395,7 +782,7 @@ export default function NewRunPage() {
                       }
                       type="checkbox"
                     />
-                    Quick Attack
+                    {text.quickAttack}
                   </label>
                 </div>
 
@@ -403,7 +790,7 @@ export default function NewRunPage() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <label>
-                        <span className="label mb-1 block">Target Model Name</span>
+                        <span className="label mb-1 block">{text.targetModelName}</span>
                         <input
                           className="input"
                           onChange={(event) =>
@@ -417,7 +804,7 @@ export default function NewRunPage() {
                         />
                       </label>
                       <label>
-                        <span className="label mb-1 block">Dataset</span>
+                        <span className="label mb-1 block">{text.dataset}</span>
                         <select
                           className="select"
                           onChange={(event) =>
@@ -430,7 +817,7 @@ export default function NewRunPage() {
                         >
                           {datasetOptions.map((item) => (
                             <option disabled={!item.exists} key={item.key} value={item.key}>
-                              {item.exists ? item.name : `${item.name} (unavailable)`}
+                              {item.exists ? item.name : `${item.name} (${text.unavailable})`}
                             </option>
                           ))}
                         </select>
@@ -440,11 +827,11 @@ export default function NewRunPage() {
 
                     <details className="tech-subpanel p-3">
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                        Target API Credentials {benchmarkWillRun ? "(required for benchmark)" : "(optional)"}
+                        {text.targetApiCreds} {benchmarkWillRun ? text.requiredForBenchmark : text.optional}
                       </summary>
                       <div className="mt-3 space-y-3">
                         <label>
-                          <span className="label mb-1 block">OpenAI Base URL</span>
+                          <span className="label mb-1 block">{text.openaiBaseUrl}</span>
                           <input
                             className="input mono"
                             onChange={(event) =>
@@ -458,7 +845,7 @@ export default function NewRunPage() {
                           />
                         </label>
                         <label>
-                          <span className="label mb-1 block">OpenAI API Key</span>
+                          <span className="label mb-1 block">{text.openaiApiKey}</span>
                           <input
                             className="input mono"
                             onChange={(event) =>
@@ -477,7 +864,7 @@ export default function NewRunPage() {
 
                     <details className="tech-subpanel p-3" open={selectedCount === 0}>
                       <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                        Attack Methods ({selectedCount} selected / {methodOptions.length})
+                        {text.attackMethods} ({selectedCount} {text.selected} / {methodOptions.length})
                       </summary>
                       <div className="mt-3 space-y-3">
                         <div className="flex items-center gap-2">
@@ -486,32 +873,55 @@ export default function NewRunPage() {
                             onClick={() => setPayload((prev) => ({ ...prev, quick_attack_methods: [...methodOptions] }))}
                             type="button"
                           >
-                            Select All
+                            {text.selectAll}
                           </button>
                           <button
                             className="btn"
                             onClick={() => setPayload((prev) => ({ ...prev, quick_attack_methods: [] }))}
                             type="button"
                           >
-                            Clear
+                            {text.clear}
                           </button>
                         </div>
                         <div className="method-grid">
                           {methodOptions.map((method) => {
                             const selected = payload.quick_attack_methods.includes(method);
+                            const methodInfo = getAttackMethodInfo(method);
+                            const methodSummary = locale === "zh" ? methodInfo.summary_zh : methodInfo.summary_en;
                             return (
-                              <label
-                                className={selected ? "method-chip method-chip-active" : "method-chip"}
-                                key={method}
-                              >
-                                <input
-                                  checked={selected}
-                                  className="sr-only"
-                                  onChange={() => toggleMethod(method)}
-                                  type="checkbox"
-                                />
-                                {method}
-                              </label>
+                              <div className="method-chip-wrap" key={method}>
+                                <label className={selected ? "method-chip method-chip-active" : "method-chip"}>
+                                  <input
+                                    checked={selected}
+                                    className="sr-only"
+                                    onChange={() => toggleMethod(method)}
+                                    type="checkbox"
+                                  />
+                                  <span>{method}</span>
+                                </label>
+                                <div className="method-tip-card" role="tooltip">
+                                  <p className="method-tip-title mono">{method}</p>
+                                  <p className="method-tip-line">
+                                    <span className="method-tip-label">{text.methodIntro}</span>
+                                    <span>{methodSummary}</span>
+                                  </p>
+                                  <div className="method-tip-links">
+                                    {methodInfo.paper_url ? (
+                                      <a href={methodInfo.paper_url} rel="noreferrer noopener" target="_blank">
+                                        {text.methodPaper}
+                                      </a>
+                                    ) : null}
+                                    {methodInfo.repo_url ? (
+                                      <a href={methodInfo.repo_url} rel="noreferrer noopener" target="_blank">
+                                        {text.methodRepo}
+                                      </a>
+                                    ) : null}
+                                    {methodInfo.paper_url || methodInfo.repo_url ? null : (
+                                      <span className="method-tip-empty">{text.methodNoRef}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
                             );
                           })}
                         </div>
@@ -520,7 +930,7 @@ export default function NewRunPage() {
                   </div>
                 ) : (
                   <label>
-                    <span className="label mb-1 block">Attack Config Path (directory or .yaml)</span>
+                    <span className="label mb-1 block">{text.attackConfigPath}</span>
                     <input
                       className="input mono"
                       list="attackConfigPathOptions"
@@ -533,9 +943,7 @@ export default function NewRunPage() {
                         <option key={item} value={item} />
                       ))}
                     </datalist>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Use a directory to run all yaml files, or a single yaml path to run one method.
-                    </p>
+                    <p className="mt-1 text-xs text-slate-600">{text.attackConfigHelp}</p>
                   </label>
                 )}
               </article>
@@ -543,11 +951,11 @@ export default function NewRunPage() {
 
             {isBenchmarkMode ? (
               <article className="section-card">
-                <p className="label mb-3">Benchmark Settings</p>
+                <p className="label mb-3">{text.benchmarkSettings}</p>
                 <div className="space-y-3">
                   {showBenchmarkManualPath ? (
                     <label>
-                      <span className="label mb-1 block">Benchmark Config Path</span>
+                      <span className="label mb-1 block">{text.benchmarkConfigPath}</span>
                       <input
                         className="input mono"
                         onChange={(event) => setPayload((prev) => ({ ...prev, benchmark_config_path: event.target.value }))}
@@ -557,14 +965,14 @@ export default function NewRunPage() {
                     </label>
                   ) : (
                     <label>
-                      <span className="label mb-1 block">Benchmark Config File</span>
+                      <span className="label mb-1 block">{text.benchmarkConfigFile}</span>
                       <select
                         className="select mono"
                         onChange={(event) => setPayload((prev) => ({ ...prev, benchmark_config_path: event.target.value }))}
                         value={payload.benchmark_config_path}
                       >
                         <option value="">
-                          {payload.mode === "benchmark_only" ? "Select benchmark config file" : "Skip benchmark stage"}
+                          {payload.mode === "benchmark_only" ? text.selectBenchmarkConfigFile : text.skipBenchmarkStage}
                         </option>
                         {benchmarkConfigOptions.map((item) => (
                           <option key={item} value={item}>
@@ -588,14 +996,14 @@ export default function NewRunPage() {
                       }}
                       type="checkbox"
                     />
-                    Manual benchmark config path
+                    {text.manualBenchmarkConfigPath}
                   </label>
                 </div>
 
                 {benchmarkNeedsStandaloneTarget ? (
                   <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <label>
-                      <span className="label mb-1 block">Target Model Name</span>
+                      <span className="label mb-1 block">{text.targetModelName}</span>
                       <input
                         className="input"
                         onChange={(event) => setPayload((prev) => ({ ...prev, quick_target_model_name: event.target.value }))}
@@ -604,7 +1012,7 @@ export default function NewRunPage() {
                       />
                     </label>
                     <label>
-                      <span className="label mb-1 block">Target OpenAI Base URL</span>
+                      <span className="label mb-1 block">{text.targetOpenaiBaseUrl}</span>
                       <input
                         className="input mono"
                         onChange={(event) => setPayload((prev) => ({ ...prev, quick_openai_base_url: event.target.value }))}
@@ -613,7 +1021,7 @@ export default function NewRunPage() {
                       />
                     </label>
                     <label className="md:col-span-2">
-                      <span className="label mb-1 block">Target OpenAI API Key</span>
+                      <span className="label mb-1 block">{text.targetOpenaiApiKey}</span>
                       <input
                         className="input mono"
                         onChange={(event) => setPayload((prev) => ({ ...prev, quick_openai_api_key: event.target.value }))}
@@ -624,22 +1032,18 @@ export default function NewRunPage() {
                     </label>
                   </div>
                 ) : (
-                  <p className="tech-subpanel mt-4 p-3 text-sm text-slate-700">
-                    Benchmark will reuse target model settings from Attack section in full pipeline mode.
-                  </p>
+                  <p className="tech-subpanel mt-4 p-3 text-sm text-slate-700">{text.benchmarkReuseHint}</p>
                 )}
-                <p className="mt-2 text-xs text-slate-600">
-                  Runtime config is generated from template; top-level benchmark model is auto-bound to target model.
-                </p>
+                <p className="mt-2 text-xs text-slate-600">{text.runtimeConfigHint}</p>
               </article>
             ) : null}
 
             {isEvaluateMode ? (
               <article className="section-card">
-                <p className="label mb-3">Evaluate Settings</p>
+                <p className="label mb-3">{text.evaluateSettings}</p>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <label>
-                    <span className="label mb-1 block">Eval Profile</span>
+                    <span className="label mb-1 block">{text.evalProfile}</span>
                     <select
                       className="select"
                       onChange={(event) => setPayload((prev) => ({ ...prev, eval_profile: event.target.value }))}
@@ -650,7 +1054,7 @@ export default function NewRunPage() {
                     </select>
                   </label>
                   <label>
-                    <span className="label mb-1 block">Results Root</span>
+                    <span className="label mb-1 block">{text.resultsRoot}</span>
                     <input
                       className="input mono"
                       onChange={(event) => setPayload((prev) => ({ ...prev, results_root: event.target.value }))}
@@ -663,13 +1067,13 @@ export default function NewRunPage() {
                 {payload.mode === "eval_only" ? (
                   <div className="mt-4 space-y-4">
                     <label>
-                      <span className="label mb-1 block">Use Existing Run Manifest (optional)</span>
+                      <span className="label mb-1 block">{text.useExistingRunManifest}</span>
                       <select
                         className="select"
                         onChange={(event) => setManifestSourceRunId(event.target.value)}
                         value={manifestSourceRunId}
                       >
-                        <option value="">Manual manifest path</option>
+                        <option value="">{text.manualManifestPath}</option>
                         {manifestSourceRuns.map((item) => (
                           <option key={item.run_id} value={item.run_id}>
                             {item.name} ({item.run_id.slice(0, 8)})
@@ -678,7 +1082,7 @@ export default function NewRunPage() {
                       </select>
                     </label>
                     <label>
-                      <span className="label mb-1 block">Result Manifest Path</span>
+                      <span className="label mb-1 block">{text.resultManifestPath}</span>
                       <input
                         className="input mono"
                         disabled={!!selectedManifestSourceRun}
@@ -690,11 +1094,11 @@ export default function NewRunPage() {
                   </div>
                 ) : (
                   <label className="mt-4 block">
-                    <span className="label mb-1 block">Result Manifest Path (optional)</span>
+                    <span className="label mb-1 block">{text.resultManifestPathOptional}</span>
                     <input
                       className="input mono"
                       onChange={(event) => setPayload((prev) => ({ ...prev, result_manifest: event.target.value }))}
-                      placeholder="Leave empty to use this run's attack outputs"
+                      placeholder={text.leaveEmptyManifest}
                       value={payload.result_manifest}
                     />
                   </label>
@@ -709,7 +1113,7 @@ export default function NewRunPage() {
             ) : null}
             <div className="flex flex-wrap items-center gap-2">
               <button className={submitting ? "btn btn-primary btn-busy" : "btn btn-primary"} disabled={submitting || initializing} type="submit">
-                {submitting ? "Submitting..." : initializing ? "Preparing..." : modeSubmitLabel(payload.mode)}
+                {submitting ? text.submitting : initializing ? text.preparing : modeSubmitLabel(payload.mode, locale)}
               </button>
               <button
                 className="btn"
@@ -717,44 +1121,45 @@ export default function NewRunPage() {
                   setPayload(defaultPayload);
                   setManifestSourceRunId("");
                   setBenchmarkManualPathEnabled(false);
+                  setSimpleMode(true);
                   setError("");
                 }}
                 type="button"
               >
-                Reset
+                {text.reset}
               </button>
             </div>
           </div>
 
           <aside className="space-y-4 xl:col-span-4 xl:sticky xl:top-6 xl:self-start reveal-grid">
             <article className="stat-card">
-              <p className="label mb-2">Run Preview</p>
+              <p className="label mb-2">{text.runPreview}</p>
               <dl className="space-y-2 text-sm text-slate-700">
                 <div>
-                  <dt className="label">Mode</dt>
-                  <dd>{payload.mode}</dd>
+                  <dt className="label">{text.mode}</dt>
+                  <dd>{formatRunMode(payload.mode, locale)}</dd>
                 </div>
                 <div>
-                  <dt className="label">Stages</dt>
+                  <dt className="label">{text.stages}</dt>
                   <dd className="mono text-xs">{stagePreview.join(" -> ") || "-"}</dd>
                 </div>
                 <div>
-                  <dt className="label">Target Model</dt>
+                  <dt className="label">{text.targetModel}</dt>
                   <dd>{payload.quick_target_model_name || "-"}</dd>
                 </div>
                 <div>
-                  <dt className="label">Attack Methods</dt>
+                  <dt className="label">{text.attackMethodsCount}</dt>
                   <dd>{isAttackMode && payload.quick_attack_enabled ? selectedCount : 0}</dd>
                 </div>
                 <div>
-                  <dt className="label">Benchmark Config</dt>
+                  <dt className="label">{text.benchmarkConfig}</dt>
                   <dd className="mono text-xs">{payload.benchmark_config_path || "-"}</dd>
                 </div>
               </dl>
             </article>
 
             <article className="stat-card">
-              <p className="label mb-2">Checklist</p>
+              <p className="label mb-2">{text.checklist}</p>
               {previewWarnings.length ? (
                 <div className="notice notice-warn">
                   <ul className="space-y-1 text-sm">
@@ -764,14 +1169,13 @@ export default function NewRunPage() {
                   </ul>
                 </div>
               ) : (
-                <p className="notice notice-good text-sm">Form looks good. Ready to start.</p>
+                <p className="notice notice-good text-sm">{text.formLooksGood}</p>
               )}
-              <p className="mt-3 text-xs text-slate-600">
-                Artifacts and intermediate outputs are isolated by run id, avoiding cross-run pollution.
-              </p>
+              <p className="mt-3 text-xs text-slate-600">{text.isolationHint}</p>
             </article>
           </aside>
         </div>
+        )}
       </form>
     </section>
   );

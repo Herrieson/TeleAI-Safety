@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { useI18n } from "@/components/common/LocaleProvider";
+import { formatDateTime, formatRunMode, formatRunStatus, formatStageName } from "@/lib/i18n";
 import type { Run } from "@/lib/types";
 
 type RunTableProps = {
@@ -11,8 +15,10 @@ type RunTableProps = {
   emptyMessage?: string;
 };
 
-function summarizeStages(run: Run) {
-  return run.stages.map((stage) => `${stage.stage}:${stage.status}`).join(" | ");
+function summarizeStages(run: Run, locale: "zh" | "en") {
+  return run.stages
+    .map((stage) => `${formatStageName(stage.stage, locale)}:${formatRunStatus(stage.status, locale)}`)
+    .join(" | ");
 }
 
 function modeStyle(mode: Run["mode"]): string {
@@ -28,29 +34,57 @@ function modeStyle(mode: Run["mode"]): string {
   return "mode-chip mode-chip-eval";
 }
 
-function renderUpdatedAt(raw: string): string {
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) {
-    return raw;
-  }
-  return date.toLocaleString();
+function renderUpdatedAt(raw: string, locale: "zh" | "en"): string {
+  return formatDateTime(raw, locale);
 }
 
 export function RunTable({ runs, onCancel, onDelete, actionRunId, actionKind, emptyMessage }: RunTableProps) {
+  const { locale } = useI18n();
+  const text =
+    locale === "zh"
+      ? {
+          noRuns: "暂无运行记录。",
+          name: "名称",
+          mode: "模式",
+          status: "状态",
+          stages: "阶段",
+          updated: "更新时间",
+          actions: "操作",
+          detail: "详情",
+          canceling: "取消中...",
+          cancel: "取消",
+          deleting: "删除中...",
+          delete: "删除"
+        }
+      : {
+          noRuns: "No runs yet.",
+          name: "Name",
+          mode: "Mode",
+          status: "Status",
+          stages: "Stages",
+          updated: "Updated",
+          actions: "Actions",
+          detail: "Detail",
+          canceling: "Canceling...",
+          cancel: "Cancel",
+          deleting: "Deleting...",
+          delete: "Delete"
+        };
+
   if (!runs.length) {
-    return <p className="notice p-4 text-sm text-slate-600">{emptyMessage || "No runs yet."}</p>;
+    return <p className="notice p-4 text-sm text-slate-600">{emptyMessage || text.noRuns}</p>;
   }
   return (
     <div className="data-table-wrap">
       <table className="data-table min-w-[920px] bg-transparent">
         <thead>
           <tr>
-            <th className="font-semibold">Name</th>
-            <th className="font-semibold">Mode</th>
-            <th className="font-semibold">Status</th>
-            <th className="font-semibold">Stages</th>
-            <th className="font-semibold">Updated</th>
-            <th className="font-semibold">Actions</th>
+            <th className="font-semibold">{text.name}</th>
+            <th className="font-semibold">{text.mode}</th>
+            <th className="font-semibold">{text.status}</th>
+            <th className="font-semibold">{text.stages}</th>
+            <th className="font-semibold">{text.updated}</th>
+            <th className="font-semibold">{text.actions}</th>
           </tr>
         </thead>
         <tbody>
@@ -61,21 +95,21 @@ export function RunTable({ runs, onCancel, onDelete, actionRunId, actionKind, em
                 <p className="mono mt-1 text-xs text-slate-500">{run.run_id}</p>
               </td>
               <td>
-                <span className={modeStyle(run.mode)}>{run.mode.replace("_", " ")}</span>
+                <span className={modeStyle(run.mode)}>{formatRunMode(run.mode, locale)}</span>
               </td>
               <td>
                 <RunStatusBadge status={run.status} />
               </td>
               <td>
-                <p className="mono text-xs text-slate-700">{summarizeStages(run) || "-"}</p>
+                <p className="mono text-xs text-slate-700">{summarizeStages(run, locale) || "-"}</p>
               </td>
               <td>
-                <p className="text-slate-700">{renderUpdatedAt(run.updated_at)}</p>
+                <p className="text-slate-700">{renderUpdatedAt(run.updated_at, locale)}</p>
               </td>
               <td>
                 <div className="flex items-center gap-2">
                   <Link className="btn" href={`/runs/${run.run_id}`}>
-                    Detail
+                    {text.detail}
                   </Link>
                   {(run.status === "pending" || run.status === "running") && (
                     <button
@@ -84,7 +118,7 @@ export function RunTable({ runs, onCancel, onDelete, actionRunId, actionKind, em
                       onClick={() => void onCancel(run.run_id)}
                       type="button"
                     >
-                      {actionRunId === run.run_id && actionKind === "cancel" ? "Canceling..." : "Cancel"}
+                      {actionRunId === run.run_id && actionKind === "cancel" ? text.canceling : text.cancel}
                     </button>
                   )}
                   <button
@@ -93,7 +127,7 @@ export function RunTable({ runs, onCancel, onDelete, actionRunId, actionKind, em
                     onClick={() => void onDelete(run.run_id)}
                     type="button"
                   >
-                    {actionRunId === run.run_id && actionKind === "delete" ? "Deleting..." : "Delete"}
+                    {actionRunId === run.run_id && actionKind === "delete" ? text.deleting : text.delete}
                   </button>
                 </div>
               </td>

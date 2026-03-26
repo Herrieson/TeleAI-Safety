@@ -1,13 +1,16 @@
 import type {
   AttackConfigOptionsResponse,
   BenchmarkConfigOptionsResponse,
+  LeaderboardResponse,
   QuickAttackDatasetsResponse,
   QuickAttackMethodsResponse,
   Run,
   RunArtifactsResponse,
   RunCreatePayload,
   RunLogsResponse,
-  RunMetricsSummaryResponse
+  RunMetricTaskReportResponse,
+  RunMetricsSummaryResponse,
+  RunMetricTasksResponse
 } from "@/lib/types";
 
 const BASE_URL = (process.env.NEXT_PUBLIC_BFF_BASE_URL || "http://127.0.0.1:9000").replace(/\/+$/, "");
@@ -82,6 +85,15 @@ export function getRunMetricsSummary(runId: string) {
   return request<RunMetricsSummaryResponse>(`/api/runs/${runId}/metrics/summary`);
 }
 
+export function getRunMetricTasks(runId: string) {
+  return request<RunMetricTasksResponse>(`/api/runs/${runId}/metrics/tasks`);
+}
+
+export function exportRunMetricTaskReport(runId: string, taskId: string) {
+  const encodedTaskId = encodeURIComponent(taskId);
+  return request<RunMetricTaskReportResponse>(`/api/runs/${runId}/metrics/tasks/${encodedTaskId}/report`);
+}
+
 export function getQuickAttackMethods() {
   return request<QuickAttackMethodsResponse>("/api/quick-attack/methods");
 }
@@ -96,6 +108,10 @@ export function getAttackConfigOptions() {
 
 export function getBenchmarkConfigOptions() {
   return request<BenchmarkConfigOptionsResponse>("/api/benchmark/config-options");
+}
+
+export function getLeaderboard() {
+  return request<LeaderboardResponse>("/api/leaderboard");
 }
 
 export { ApiError };

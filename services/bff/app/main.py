@@ -10,9 +10,12 @@ from .orchestrator_client import (
     cancel_run as orchestrator_cancel_run,
     create_run as orchestrator_create_run,
     delete_run as orchestrator_delete_run,
-    get_quick_attack_datasets as orchestrator_get_quick_attack_datasets,
+    export_metric_task_report as orchestrator_export_metric_task_report,
     get_logs as orchestrator_get_logs,
     get_metric_summary as orchestrator_get_metric_summary,
+    get_metric_tasks as orchestrator_get_metric_tasks,
+    get_leaderboard as orchestrator_get_leaderboard,
+    get_quick_attack_datasets as orchestrator_get_quick_attack_datasets,
     get_quick_attack_methods as orchestrator_get_quick_attack_methods,
     get_run as orchestrator_get_run,
     health as orchestrator_health,
@@ -94,6 +97,21 @@ def get_logs(
 @app.get("/api/runs/{run_id}/metrics/summary")
 def get_metric_summary(run_id: str):
     return orchestrator_get_metric_summary(run_id)
+
+
+@app.get("/api/runs/{run_id}/metrics/tasks")
+def get_metric_tasks(run_id: str):
+    return orchestrator_get_metric_tasks(run_id)
+
+
+@app.get("/api/runs/{run_id}/metrics/tasks/{task_id}/report")
+def export_metric_task_report(run_id: str, task_id: str):
+    return orchestrator_export_metric_task_report(run_id, task_id)
+
+
+@app.get("/api/leaderboard")
+def get_leaderboard():
+    return orchestrator_get_leaderboard()
 
 
 @app.get("/api/quick-attack/methods")

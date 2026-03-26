@@ -1,4 +1,8 @@
+"use client";
+
 import type { RunStatus } from "@/lib/types";
+import { formatRunStatus } from "@/lib/i18n";
+import { useI18n } from "@/components/common/LocaleProvider";
 
 const statusStyleMap: Record<RunStatus, string> = {
   pending: "bg-slate-900/70 text-slate-200 border-slate-600",
@@ -9,12 +13,14 @@ const statusStyleMap: Record<RunStatus, string> = {
 };
 
 export function RunStatusBadge({ status }: { status: RunStatus }) {
+  const { locale } = useI18n();
+
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] shadow-sm ${statusStyleMap[status]}`}
     >
       <span className="inline-block h-1.5 w-1.5 rounded-full bg-current opacity-80" />
-      {status}
+      {formatRunStatus(status, locale)}
     </span>
   );
 }

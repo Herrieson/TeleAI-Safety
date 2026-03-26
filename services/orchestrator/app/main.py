@@ -1,6 +1,9 @@
+import csv
+import json
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -13,6 +16,21 @@ from .store import run_store
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
+
+LEADERBOARD_METRICS = [
+    {"key": "avg_asr", "label": "Avg ASR", "better": "lower", "format": "percent", "precision": 4},
+    {"key": "avg_frr", "label": "Avg FRR", "better": "lower", "format": "percent", "precision": 4},
+    {"key": "mu_asr", "label": "mu ASR", "better": "lower", "format": "percent", "precision": 4},
+    {"key": "sigma_asr", "label": "sigma ASR", "better": "lower", "format": "percent", "precision": 4},
+    {"key": "mds", "label": "MDS", "better": "higher", "format": "number", "precision": 6},
+    {"key": "bias", "label": "Bias", "better": "absolute_zero", "format": "number", "precision": 6},
+    {"key": "wsl", "label": "WSL", "better": "lower", "format": "number", "precision": 6},
+    {"key": "cm", "label": "CM", "better": "lower", "format": "number", "precision": 6},
+    {"key": "avg_kappa", "label": "Avg Kappa", "better": "higher", "format": "number", "precision": 6},
+    {"key": "median_kappa", "label": "Median Kappa", "better": "higher", "format": "number", "precision": 6},
+    {"key": "min_kappa", "label": "Min Kappa", "better": "higher", "format": "number", "precision": 6},
+    {"key": "max_kappa", "label": "Max Kappa", "better": "higher", "format": "number", "precision": 6},
+]
 
 
 @app.get("/health")
@@ -111,6 +129,44 @@ def get_metric_summary(run_id: str):
     }
 
 
+@app.get("/v1/runs/{run_id}/metrics/tasks")
+def list_metric_tasks(run_id: str):
+    run = run_store.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+
+    tasks = _load_metric_tasks(run_id)
+    return {
+        "run_id": run_id,
+        "count": len(tasks),
+        "tasks": [_public_metric_task(row) for row in tasks],
+    }
+
+
+@app.get("/v1/runs/{run_id}/metrics/tasks/{task_id}/report")
+def export_metric_task_report(run_id: str, task_id: str):
+    run = run_store.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+
+    tasks = _load_metric_tasks(run_id)
+    selected = next((row for row in tasks if row["task_id"] == task_id), None)
+    if selected is None:
+        raise HTTPException(status_code=404, detail=f"metric task not found: {task_id}")
+
+    report_content = _build_metric_task_report(run, selected)
+    attack = _slugify(str(selected.get("attack_group") or "attack"), fallback="attack")
+    scorer = _slugify(str(selected.get("scorer") or "scorer"), fallback="scorer")
+    filename = f"eval-task-{run_id[:8]}-{attack}-{scorer}.md"
+
+    return {
+        "run_id": run_id,
+        "task_id": task_id,
+        "filename": filename,
+        "content": report_content,
+    }
+
+
 @app.get("/v1/runs/{run_id}/logs")
 def get_run_logs(
     run_id: str,
@@ -146,6 +202,264 @@ def get_run_logs(
     }
 
 
+def _run_eval_report_root(run_id: str) -> Path:
+    return settings.repo_root / "evaluate" / "evaluation_report" / "runs" / run_id
+
+
+def _eval_report_root() -> Path:
+    return settings.repo_root / "evaluate" / "evaluation_report"
+
+
+@app.get("/v1/leaderboard")
+def get_leaderboard():
+    source_path = _find_leaderboard_source_file()
+    generated_at = datetime.utcnow().isoformat() + "Z"
+    if source_path is None:
+        return {
+            "generated_at": generated_at,
+            "source_csv": "",
+            "source_updated_at": "",
+            "model_count": 0,
+            "metric_count": len(LEADERBOARD_METRICS),
+            "metrics": _public_leaderboard_metrics(),
+            "rows": [],
+        }
+
+    rows: List[Dict[str, object]] = []
+    try:
+        with source_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                record_type = (row.get("record_type") or "").strip().lower()
+                if record_type != "model":
+                    continue
+                model = (row.get("model") or "").strip()
+                if not model:
+                    continue
+
+                metrics: Dict[str, Optional[float]] = {}
+                for spec in LEADERBOARD_METRICS:
+                    key = str(spec["key"])
+                    metrics[key] = _to_float(row.get(key))
+
+                rows.append(
+                    {
+                        "model": model,
+                        "metrics": metrics,
+                    }
+                )
+    except OSError:
+        rows = []
+
+    rows.sort(key=lambda item: str(item.get("model") or ""))
+    return {
+        "generated_at": generated_at,
+        "source_csv": _repo_relative_path(source_path),
+        "source_updated_at": _file_updated_at(source_path),
+        "model_count": len(rows),
+        "metric_count": len(LEADERBOARD_METRICS),
+        "metrics": _public_leaderboard_metrics(),
+        "rows": rows,
+    }
+
+
+def _load_metric_tasks(run_id: str) -> List[Dict[str, object]]:
+    eval_root = _run_eval_report_root(run_id)
+    summary_path = eval_root / "asr" / "summary_long.csv"
+    if not summary_path.exists() or not summary_path.is_file():
+        return []
+
+    rows: List[Dict[str, object]] = []
+    try:
+        with summary_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for idx, row in enumerate(reader, start=1):
+                attack_group = (row.get("attack_group") or "").strip()
+                scorer = (row.get("scorer") or "").strip()
+                report_rel = (row.get("report_path") or "").strip()
+                report_file = _safe_path_in_dir(eval_root / "asr", report_rel)
+                input_file = (row.get("input_file") or "").strip()
+
+                rows.append(
+                    {
+                        "task_id": str(idx),
+                        "attack_run": (row.get("attack_run") or "").strip(),
+                        "attack_group": attack_group,
+                        "scorer": scorer,
+                        "total_samples": _to_int(row.get("total_samples")),
+                        "skipped_samples": _to_int(row.get("skipped_samples")),
+                        "attack_success_samples": _to_int(row.get("attack_success_samples")),
+                        "asr": _to_float(row.get("asr")),
+                        "asr_strict": _to_float(row.get("asr_strict")),
+                        "asr_effective": _to_float(row.get("asr_effective")),
+                        "frr": _to_float(row.get("frr")),
+                        "frr_invalid_rate": _to_float(row.get("frr_invalid_rate")),
+                        "report_path": report_rel,
+                        "input_file": input_file,
+                        "_report_file": str(report_file) if report_file else "",
+                        "_raw": row,
+                        "_summary_path": str(summary_path),
+                    }
+                )
+    except OSError:
+        return []
+
+    return rows
+
+
+def _public_metric_task(task: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "task_id": task.get("task_id") or "",
+        "attack_run": task.get("attack_run") or "",
+        "attack_group": task.get("attack_group") or "",
+        "scorer": task.get("scorer") or "",
+        "total_samples": task.get("total_samples"),
+        "skipped_samples": task.get("skipped_samples"),
+        "attack_success_samples": task.get("attack_success_samples"),
+        "asr": task.get("asr"),
+        "asr_strict": task.get("asr_strict"),
+        "asr_effective": task.get("asr_effective"),
+        "frr": task.get("frr"),
+        "frr_invalid_rate": task.get("frr_invalid_rate"),
+        "report_path": task.get("report_path") or "",
+        "input_file": task.get("input_file") or "",
+    }
+
+
+def _build_metric_task_report(run: RunRecord, task: Dict[str, object]) -> str:
+    now_text = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    summary_path = str(task.get("_summary_path") or "")
+    report_file = str(task.get("_report_file") or "")
+    report_detail = ""
+    if report_file:
+        try:
+            report_detail = Path(report_file).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            report_detail = ""
+
+    if len(report_detail) > 200000:
+        report_detail = report_detail[:200000] + "\n\n...[truncated]"
+
+    evaluate_log_path = ""
+    for stage in run.stages:
+        if stage.stage == "evaluate" and stage.log_path:
+            evaluate_log_path = stage.log_path
+            break
+
+    task_payload = _public_metric_task(task)
+    raw_row = task.get("_raw")
+
+    lines = [
+        "# Evaluation Task Report",
+        "",
+        f"- Generated at: {now_text}",
+        f"- Run ID: {run.run_id}",
+        f"- Run Name: {run.name}",
+        f"- Task ID: {task_payload['task_id']}",
+        f"- Mode: {run.mode}",
+        f"- Eval Profile: {run.eval_profile or '-'}",
+        "",
+        "## Task Overview",
+        "",
+        f"- Attack Group: {task_payload['attack_group'] or '-'}",
+        f"- Scorer: {task_payload['scorer'] or '-'}",
+        f"- Attack Run: {task_payload['attack_run'] or '-'}",
+        "",
+        "## Key Metrics",
+        "",
+        f"- Total Samples: {task_payload['total_samples'] if task_payload['total_samples'] is not None else '-'}",
+        f"- Skipped Samples: {task_payload['skipped_samples'] if task_payload['skipped_samples'] is not None else '-'}",
+        f"- Attack Success Samples: {task_payload['attack_success_samples'] if task_payload['attack_success_samples'] is not None else '-'}",
+        f"- ASR: {_format_metric(task_payload['asr'])}",
+        f"- ASR Strict: {_format_metric(task_payload['asr_strict'])}",
+        f"- ASR Effective: {_format_metric(task_payload['asr_effective'])}",
+        f"- FRR: {_format_metric(task_payload['frr'])}",
+        f"- FRR Invalid Rate: {_format_metric(task_payload['frr_invalid_rate'])}",
+        "",
+        "## Source Files",
+        "",
+        f"- summary_long.csv: {summary_path or '-'}",
+        f"- per-task report: {report_file or '-'}",
+        f"- input file: {task_payload['input_file'] or '-'}",
+        f"- evaluate log: {evaluate_log_path or '-'}",
+    ]
+
+    if report_detail:
+        lines.extend(
+            [
+                "",
+                "## Detailed Output",
+                "",
+                "```text",
+                report_detail,
+                "```",
+            ]
+        )
+
+    if isinstance(raw_row, dict):
+        lines.extend(
+            [
+                "",
+                "## Raw CSV Row",
+                "",
+                "```json",
+                json.dumps(raw_row, ensure_ascii=False, indent=2),
+                "```",
+            ]
+        )
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _safe_path_in_dir(base: Path, rel_path: str) -> Optional[Path]:
+    rel = (rel_path or "").strip()
+    if not rel:
+        return None
+    root = base.resolve()
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    if not candidate.exists() or not candidate.is_file():
+        return None
+    return candidate
+
+
+def _to_int(value: Optional[str]) -> Optional[int]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(float(raw))
+    except ValueError:
+        return None
+
+
+def _to_float(value: Optional[str]) -> Optional[float]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _format_metric(value: object) -> str:
+    if isinstance(value, (int, float)):
+        row = float(value)
+        if 0 <= row <= 1:
+            return f"{row * 100:.2f}%"
+        return f"{row:.6f}"
+    return "-"
+
+
+def _slugify(value: str, fallback: str = "item") -> str:
+    cleaned = re.sub(r"[^0-9a-zA-Z._-]+", "-", (value or "").strip()).strip("-._")
+    return cleaned or fallback
+
+
 def _tail(path: Path, tail_lines: int) -> str:
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -154,6 +468,56 @@ def _tail(path: Path, tail_lines: int) -> str:
     if not lines:
         return ""
     return "\n".join(lines[-tail_lines:])
+
+
+def _find_leaderboard_source_file() -> Optional[Path]:
+    report_root = _eval_report_root()
+    preferred = report_root / "all_metrics_summary.csv"
+    if preferred.exists() and preferred.is_file():
+        return preferred
+
+    run_root = report_root / "runs"
+    if not run_root.exists() or not run_root.is_dir():
+        return None
+
+    candidates: List[Path] = []
+    for path in run_root.glob("*/all_metrics_summary.csv"):
+        if path.exists() and path.is_file():
+            candidates.append(path)
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda row: row.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def _repo_relative_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(settings.repo_root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _file_updated_at(path: Path) -> str:
+    try:
+        return datetime.utcfromtimestamp(path.stat().st_mtime).isoformat() + "Z"
+    except OSError:
+        return ""
+
+
+def _public_leaderboard_metrics() -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    for spec in LEADERBOARD_METRICS:
+        rows.append(
+            {
+                "key": spec["key"],
+                "label": spec["label"],
+                "better": spec["better"],
+                "format": spec["format"],
+                "precision": spec["precision"],
+            }
+        )
+    return rows
 
 
 @app.get("/v1/quick-attack/methods")

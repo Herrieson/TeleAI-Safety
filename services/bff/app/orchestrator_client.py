@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, Optional
 from urllib import error, request
+from urllib.parse import quote
 
 from fastapi import HTTPException
 
@@ -65,6 +66,15 @@ def get_metric_summary(run_id: str) -> Any:
     return _call("GET", f"/v1/runs/{run_id}/metrics/summary")
 
 
+def get_metric_tasks(run_id: str) -> Any:
+    return _call("GET", f"/v1/runs/{run_id}/metrics/tasks")
+
+
+def export_metric_task_report(run_id: str, task_id: str) -> Any:
+    encoded_task_id = quote(task_id, safe="")
+    return _call("GET", f"/v1/runs/{run_id}/metrics/tasks/{encoded_task_id}/report")
+
+
 def get_quick_attack_methods() -> Any:
     return _call("GET", "/v1/quick-attack/methods")
 
@@ -79,3 +89,7 @@ def get_attack_config_options() -> Any:
 
 def get_benchmark_config_options() -> Any:
     return _call("GET", "/v1/benchmark/config-options")
+
+
+def get_leaderboard() -> Any:
+    return _call("GET", "/v1/leaderboard")
