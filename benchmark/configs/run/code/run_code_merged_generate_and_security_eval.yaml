@@ -30,7 +30,7 @@ judge:
   parse_retry_sleep_seconds: 1
   model:
     type: azure_openai
-    deployment: "${AZURE_OPENAI_DEPLOYMENT}"
+    deployment: gpt-5.4
     api_key: "${AZURE_OPENAI_API_KEY}"
     azure_endpoint: "${AZURE_OPENAI_ENDPOINT}"
     api_version: "${AZURE_OPENAI_API_VERSION}"
