@@ -13,7 +13,7 @@ device: cpu
 target_system_prompt: "You are a helpful AI assistant that follows the rules I provide when generating responses."
 
 # Random Search parameters
-max_iterations: 50
+max_iterations: 5
 max_restarts: 3
 max_n_to_change: 8
 logprob_threshold: -1.0

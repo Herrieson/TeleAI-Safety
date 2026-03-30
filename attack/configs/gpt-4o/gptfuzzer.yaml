@@ -30,7 +30,7 @@ energy: 5
 max_query: 100000
 max_jailbreak: 100000
 max_reject: 100000
-max_iteration: 20
+max_iteration: 5
 template_file: ./initialization/init_templates.json
 device: cpu
 

@@ -24,7 +24,7 @@ evaluator_model_path: null
 
 # TAP tree/search parameters
 tree_width: 10
-tree_depth: 10
+tree_depth: 5
 root_num: 1
 branching_factor: 4
 keep_last_n: 3

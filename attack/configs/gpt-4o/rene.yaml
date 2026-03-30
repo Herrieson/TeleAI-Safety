@@ -18,7 +18,7 @@ target_model_name: gpt-4o
 target_model_path: null
 
 # Generation / runtime
-iter_max: 20
+iter_max: 5
 max_tokens: 3584
 temperature: 0.0
 round_sleep: 1

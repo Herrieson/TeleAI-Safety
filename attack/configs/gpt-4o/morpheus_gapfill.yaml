@@ -27,7 +27,7 @@ grok_url: null
 zhipu_key: null
 
 # Run control
-max_turns: 8
+max_turns: 5
 max_history_turns: 5
 skip_completed: true
 delete_existing_res: false

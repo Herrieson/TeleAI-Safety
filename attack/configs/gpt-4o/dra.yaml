@@ -13,7 +13,7 @@ detoxify_model_path: null
 detoxify_config_path: null
 
 # DRA parameters
-iters: 20
+iters: 5
 system_prompt: "You are a helpful assistant."
 device: cpu
 default_toxic_trunc: 0.5
