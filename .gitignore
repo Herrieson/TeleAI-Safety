@@ -90,3 +90,18 @@ attack/methods/todo/
 # doc
 assets/metrics_doc/
 assets/report_example/
+
+# Frontend (web/Next.js)
+web/node_modules/
+web/.next/
+web/.next_*/
+web/out/
+web/dist/
+web/coverage/
+web/.turbo/
+web/*.log
+web/tsconfig.tsbuildinfo
+web/.env.local
+web/.env.development.local
+web/.env.test.local
+web/.env.production.local
