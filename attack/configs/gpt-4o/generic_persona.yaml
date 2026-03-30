@@ -1,0 +1,57 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+image_root_in: null
+
+# Attack model (used for persona crossover/mutation)
+attack_model_type: azure_openai
+attack_model_name: gpt-4o
+attack_model_path: ""
+
+# Target model (model under attack)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Generation (null means use model defaults)
+attack_max_n_tokens: null
+attack_temperature: null
+attack_top_p: null
+
+target_max_n_tokens: null
+target_temperature: null
+target_top_p: null
+
+# Attack prompt wrapping
+target_system_prompt: null
+attack_prefix: ""
+attack_suffix: ""
+
+# Persona source
+persona_source: init_json
+persona_init_json_path: ./assets/generic_persona/init.json
+persona_characters_dir: ./assets/generic_persona/characters
+single_persona_prompt: null
+max_personas: 35
+
+# Evolution
+enable_evolution: true
+population_size: 10
+num_generations: 5
+crossover_pairs: 2
+mutation_count: 2
+eval_sample_size: 20
+mutation_parse_max_attempts: 3
+random_seed: 7
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/generic_persona.jsonl
+log_path: ./logs/generic_persona.log

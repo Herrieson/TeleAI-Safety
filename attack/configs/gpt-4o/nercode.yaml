@@ -1,0 +1,48 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+image_root_in: null
+
+# Target model (the model under attack)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Planner model (intent parsing + scenario generation + instruction rewrite)
+# If null, falls back to target model.
+planner_model_type: null
+planner_model_name: null
+planner_model_path: ""
+
+# System prompts
+planner_system_prompt: null
+target_system_prompt: null
+
+# Planner generation
+planner_max_n_tokens: null
+planner_temperature: null
+planner_top_p: null
+
+# Target generation
+target_max_n_tokens: null
+target_temperature: null
+target_top_p: null
+
+# NerCode switches
+enable_parser: true
+enable_scenario: true
+rewrite_attempts: 5
+random_seed: 7
+scenario_few_shot_path: null
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/nercode.jsonl
+log_path: ./logs/nercode.log

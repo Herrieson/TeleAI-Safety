@@ -1,0 +1,55 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+image_root_in: null
+
+# Router model (for intent/pattern routing). If null, fallback to target model.
+router_model_type: null
+router_model_name: null
+router_model_path: ""
+
+# Generator model (for forged document generation). If null, fallback to target model.
+generator_model_type: null
+generator_model_name: null
+generator_model_path: ""
+
+# Target model (model under attack)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Router generation
+router_max_n_tokens: 1000
+router_temperature: 0.7
+router_top_p: null
+
+# Generator generation
+generator_max_n_tokens: 4000
+generator_temperature: 0.8
+generator_top_p: null
+
+# Target generation
+target_max_n_tokens: 2000
+target_temperature: 0.0
+target_top_p: null
+
+# Optional system prompt for target call
+target_system_prompt: null
+
+# ICON options
+# Force pattern in: Scientific Research | Personal Narrative | Fictional Scenario | Information Retrieval | Problem Solving
+pattern_override: null
+# false: use "...Without this defense" section; true: use "Attack ... Example" section
+attack_section_mode: false
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/icon.jsonl
+log_path: ./logs/icon.log

@@ -1,0 +1,33 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+
+# Target model (OpenAI API / OpenAI-compatible API)
+target_model_type: openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Evaluator
+evaluator_type: pattern
+evaluator_model_path: null
+
+# Runtime
+device: cpu
+mode: attack
+
+# Auth / endpoints
+# Official OpenAI:
+# - api_key: ${OPENAI_API_KEY}
+# - base_url: https://api.openai.com/v1
+#
+# OpenAI-compatible provider:
+# - api_key: <YOUR_KEY>
+# - base_url: <YOUR_OPENAI_COMPATIBLE_BASE_URL>
+api_key: ${OPENAI_API_KEY}
+base_url: https://openkey.cloud/v1
+azure_key: null
+azure_url: null
+grok_key: null
+grok_url: null
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/cipher_openai.jsonl

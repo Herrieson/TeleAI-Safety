@@ -1,0 +1,48 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_offset: 0
+image_root_in: null
+
+# Target model (model under attack)
+target_model_type: azure_openai
+target_model_name: gpt-4o
+target_model_path: ""
+
+# Judge model for optional scoring.
+# If null, fallback to target model.
+assess_model_type: null
+assess_model_name: null
+assess_model_path: ""
+
+# Auth / endpoints
+api_key: null
+base_url: null
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# Target generation (null means model defaults)
+target_max_n_tokens: null
+target_temperature: null
+target_top_p: null
+
+# Judge generation (null means model defaults)
+assess_max_n_tokens: null
+assess_temperature: null
+assess_top_p: null
+
+# Equacode options
+# one of: equacode | equation | code | origin
+attack_template: equacode
+
+# If null, method auto-selects built-in prompt (and llama fallback when enabled)
+target_system_prompt: null
+auto_llama_system_prompt: true
+
+enable_assessment: true
+assessment_parse_retries: 5
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/equacode.jsonl
+log_path: ./logs/equacode.log

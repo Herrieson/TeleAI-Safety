@@ -1,0 +1,38 @@
+# Dataset
+data_path: ../data/txt/teleai_samples_500_500.jsonl
+
+# System prompt for target model (optional)
+system_prompt: ""
+
+# Target model (OpenAI API / OpenAI-compatible API)
+target_model_type: openai
+target_model_name: gpt-4o
+target_model_path: ""
+target_model_device: cpu
+
+# Auth / endpoints
+# Official OpenAI:
+# - api_key: ${OPENAI_API_KEY}
+# - base_url: https://api.openai.com/v1
+#
+# OpenAI-compatible provider:
+# - api_key: <YOUR_KEY>
+# - base_url: <YOUR_OPENAI_COMPATIBLE_BASE_URL>
+api_key: ${OPENAI_API_KEY}
+base_url: https://api.openai.com/v1
+
+# NOTE:
+# methods/artprompt.py currently hardcodes mask_model as Azure:
+#   load_model(model_type="azure", model_name="gpt-4.1", ...)
+# So azure_key/azure_url are still required unless the method is refactored.
+azure_key: ${AZURE_OPENAI_API_KEY}
+azure_url: ${AZURE_OPENAI_ENDPOINT}
+grok_key: null
+grok_url: null
+
+# File paths (provide actual files before running)
+prompt_template_path: null
+ascii_dict_path: "./assets/ascii_dict.json"
+
+# Results
+res_save_path: ../data/attack_results/gpt-4o/artprompt_openai.jsonl
