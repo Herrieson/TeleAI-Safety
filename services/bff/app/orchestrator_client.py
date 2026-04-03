@@ -93,3 +93,7 @@ def get_benchmark_config_options() -> Any:
 
 def get_leaderboard() -> Any:
     return _call("GET", "/v1/leaderboard")
+
+
+def get_managed_target_models() -> Any:
+    return _call("GET", "/v1/managed-target-models")

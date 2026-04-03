@@ -26,6 +26,8 @@ class RunCreate(BaseModel):
     quick_openai_api_key: str = ""
     quick_attack_methods: List[str] = Field(default_factory=lambda: ["pair", "cipher", "rene"])
     quick_dataset_key: str = "teleai_samples_500_500"
+    managed_target_model_id: str = ""
+    requester_ip: str = ""
 
     @model_validator(mode="after")
     def _validate_eval_only_inputs(self):
@@ -70,6 +72,8 @@ class RunRecord(BaseModel):
     quick_openai_base_url: str = ""
     quick_attack_methods: List[str] = Field(default_factory=list)
     quick_dataset_key: str = "teleai_samples_500_500"
+    managed_target_model_id: str = ""
+    requester_ip: str = ""
     created_at: datetime
     updated_at: datetime
     ended_at: Optional[datetime] = None
@@ -116,6 +120,8 @@ def new_run_record(payload: RunCreate) -> RunRecord:
         quick_openai_base_url=payload.quick_openai_base_url,
         quick_attack_methods=payload.quick_attack_methods,
         quick_dataset_key=payload.quick_dataset_key,
+        managed_target_model_id=payload.managed_target_model_id,
+        requester_ip=payload.requester_ip,
         created_at=now,
         updated_at=now,
         stages=stages,

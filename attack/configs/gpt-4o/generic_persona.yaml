@@ -1,5 +1,5 @@
 # Dataset
-data_path: ../data/txt/teleai_samples_500_500.jsonl
+data_path: ../data/txt/teleai_samples_500_500_interleaved.jsonl
 data_offset: 0
 image_root_in: null
 

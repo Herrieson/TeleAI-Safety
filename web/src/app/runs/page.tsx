@@ -29,6 +29,9 @@ export default function RunsPage() {
           pipelineTelemetry: "流水线遥测",
           liveView: "实时视图",
           status: "状态",
+          keyword: "关键词",
+          keywordPlaceholder: "按任务名或 run id 搜索",
+          clearSearch: "清空",
           refreshing: "刷新中...",
           refresh: "刷新",
           totalRuns: "总任务数",
@@ -38,7 +41,10 @@ export default function RunsPage() {
           lastUpdated: "最近更新",
           syncing: "同步中...",
           loading: "正在加载任务...",
+          showing: (visible: number, total: number) => `显示 ${visible} / ${total} 条任务`,
           noMatch: (label: string) => `没有匹配“${label}”筛选条件的任务。`,
+          noMatchKeyword: (keyword: string) => `没有匹配关键词“${keyword}”的任务。`,
+          noMatchCombined: (label: string, keyword: string) => `没有匹配“${label}”且包含“${keyword}”的任务。`,
           noRuns: "暂无任务。",
           deleteConfirm: (runId: string) => `确认删除任务 ${runId} 以及后端产物吗？`
         }
@@ -50,6 +56,9 @@ export default function RunsPage() {
           pipelineTelemetry: "Pipeline Telemetry",
           liveView: "Live View",
           status: "Status",
+          keyword: "Keyword",
+          keywordPlaceholder: "Search by run name or run id",
+          clearSearch: "Clear",
           refreshing: "Refreshing...",
           refresh: "Refresh",
           totalRuns: "Total Runs",
@@ -59,7 +68,10 @@ export default function RunsPage() {
           lastUpdated: "Last updated",
           syncing: "syncing...",
           loading: "Loading runs...",
+          showing: (visible: number, total: number) => `Showing ${visible} / ${total} runs`,
           noMatch: (label: string) => `No runs matched filter "${label}".`,
+          noMatchKeyword: (keyword: string) => `No runs matched keyword "${keyword}".`,
+          noMatchCombined: (label: string, keyword: string) => `No runs matched filter "${label}" with keyword "${keyword}".`,
           noRuns: "No runs yet.",
           deleteConfirm: (runId: string) => `Delete run ${runId} and its backend artifacts?`
         };
@@ -69,6 +81,7 @@ export default function RunsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | RunStatus>("all");
+  const [keyword, setKeyword] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [actionState, setActionState] = useState<{ runId: string; kind: "cancel" | "delete" } | null>(null);
   const [isPageVisible, setIsPageVisible] = useState(true);
@@ -122,12 +135,42 @@ export default function RunsPage() {
     return () => clearInterval(timer);
   }, [loadRuns, isPageVisible]);
 
+  const statusCounts = useMemo<Record<"all" | RunStatus, number>>(() => {
+    const counts: Record<"all" | RunStatus, number> = {
+      all: runs.length,
+      pending: 0,
+      running: 0,
+      succeeded: 0,
+      failed: 0,
+      canceled: 0
+    };
+    runs.forEach((run) => {
+      counts[run.status] += 1;
+    });
+    return counts;
+  }, [runs]);
+
   const filteredRuns = useMemo(() => {
-    if (statusFilter === "all") {
-      return runs;
-    }
-    return runs.filter((run) => run.status === statusFilter);
-  }, [runs, statusFilter]);
+    const query = keyword.trim().toLowerCase();
+    return runs
+      .filter((run) => {
+        if (statusFilter !== "all" && run.status !== statusFilter) {
+          return false;
+        }
+        if (!query) {
+          return true;
+        }
+        return run.name.toLowerCase().includes(query) || run.run_id.toLowerCase().includes(query);
+      })
+      .sort((left, right) => {
+        const leftTime = Date.parse(left.updated_at);
+        const rightTime = Date.parse(right.updated_at);
+        if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) {
+          return right.updated_at.localeCompare(left.updated_at);
+        }
+        return rightTime - leftTime;
+      });
+  }, [keyword, runs, statusFilter]);
 
   const runStats = useMemo(() => {
     const total = runs.length;
@@ -174,6 +217,14 @@ export default function RunsPage() {
   );
 
   const filterValues: Array<"all" | RunStatus> = ["all", "pending", "running", "succeeded", "failed", "canceled"];
+  const trimmedKeyword = keyword.trim();
+  const emptyMessage = runs.length
+    ? trimmedKeyword && statusFilter !== "all"
+      ? text.noMatchCombined(statusFilterLabel(statusFilter, locale), trimmedKeyword)
+      : trimmedKeyword
+        ? text.noMatchKeyword(trimmedKeyword)
+        : text.noMatch(statusFilterLabel(statusFilter, locale))
+    : text.noRuns;
 
   return (
     <section aria-busy={loading || refreshing} className="panel p-5">
@@ -207,6 +258,21 @@ export default function RunsPage() {
               </option>
             ))}
           </select>
+          <label className="label" htmlFor="runKeywordFilter">
+            {text.keyword}
+          </label>
+          <input
+            className="input w-full min-w-[220px] sm:w-[260px]"
+            id="runKeywordFilter"
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder={text.keywordPlaceholder}
+            value={keyword}
+          />
+          {keyword ? (
+            <button className="btn" onClick={() => setKeyword("")} type="button">
+              {text.clearSearch}
+            </button>
+          ) : null}
           <button className={refreshing ? "btn btn-busy" : "btn"} disabled={refreshing} onClick={() => void loadRuns(true)} type="button">
             {refreshing ? text.refreshing : text.refresh}
           </button>
@@ -220,7 +286,7 @@ export default function RunsPage() {
             onClick={() => setStatusFilter(value)}
             type="button"
           >
-            {statusFilterLabel(value, locale)}
+            {statusFilterLabel(value, locale)} ({statusCounts[value]})
           </button>
         ))}
       </div>
@@ -254,6 +320,7 @@ export default function RunsPage() {
         <p className="text-xs text-slate-600">
           {text.lastUpdated}: {lastUpdatedAt ? formatDateTime(lastUpdatedAt, locale) : "-"}
         </p>
+        <p className="text-xs text-slate-600">{text.showing(filteredRuns.length, runs.length)}</p>
         {refreshing ? (
           <p aria-live="polite" className="inline-flex items-center gap-2 text-xs text-emerald-700">
             <span className="refresh-dot" />
@@ -272,11 +339,7 @@ export default function RunsPage() {
         <RunTable
           actionKind={actionState?.kind || null}
           actionRunId={actionState?.runId}
-          emptyMessage={
-            runs.length
-              ? text.noMatch(statusFilterLabel(statusFilter, locale))
-              : text.noRuns
-          }
+          emptyMessage={emptyMessage}
           onCancel={handleCancel}
           onDelete={handleDelete}
           runs={filteredRuns}

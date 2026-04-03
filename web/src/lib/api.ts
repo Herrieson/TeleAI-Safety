@@ -2,6 +2,7 @@ import type {
   AttackConfigOptionsResponse,
   BenchmarkConfigOptionsResponse,
   LeaderboardResponse,
+  ManagedTargetModelsResponse,
   QuickAttackDatasetsResponse,
   QuickAttackMethodsResponse,
   Run,
@@ -100,6 +101,10 @@ export function getQuickAttackMethods() {
 
 export function getQuickAttackDatasets() {
   return request<QuickAttackDatasetsResponse>("/api/quick-attack/datasets");
+}
+
+export function getManagedTargetModels() {
+  return request<ManagedTargetModelsResponse>("/api/managed-target-models");
 }
 
 export function getAttackConfigOptions() {

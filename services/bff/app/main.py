@@ -1,6 +1,8 @@
 from datetime import datetime
+from threading import Lock
+from time import monotonic
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
@@ -15,6 +17,7 @@ from .orchestrator_client import (
     get_metric_summary as orchestrator_get_metric_summary,
     get_metric_tasks as orchestrator_get_metric_tasks,
     get_leaderboard as orchestrator_get_leaderboard,
+    get_managed_target_models as orchestrator_get_managed_target_models,
     get_quick_attack_datasets as orchestrator_get_quick_attack_datasets,
     get_quick_attack_methods as orchestrator_get_quick_attack_methods,
     get_run as orchestrator_get_run,
@@ -33,6 +36,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_managed_submit_lock = Lock()
+_managed_last_submit_by_ip: dict[str, float] = {}
 
 
 @app.get("/health")
@@ -55,9 +62,144 @@ def api_health() -> dict:
     }
 
 
+def _extract_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _count_active_managed_runs(runs: list[dict]) -> int:
+    count = 0
+    for row in runs:
+        status = str(row.get("status") or "").strip().lower()
+        if status not in {"pending", "running"}:
+            continue
+        managed_id = str(row.get("managed_target_model_id") or "").strip()
+        if managed_id:
+            count += 1
+    return count
+
+
+def _count_active_managed_runs_for_ip(runs: list[dict], ip: str) -> int:
+    count = 0
+    for row in runs:
+        status = str(row.get("status") or "").strip().lower()
+        if status not in {"pending", "running"}:
+            continue
+        managed_id = str(row.get("managed_target_model_id") or "").strip()
+        requester_ip = str(row.get("requester_ip") or "").strip()
+        if managed_id and requester_ip == ip:
+            count += 1
+    return count
+
+
+def _is_ip_whitelisted(ip: str) -> bool:
+    if not ip:
+        return False
+    return ip in settings.managed_mode_ip_whitelist
+
+
+def _is_invite_code_valid(invite_code: str) -> bool:
+    raw = (invite_code or "").strip()
+    if not raw:
+        return False
+    return raw in settings.managed_mode_invite_codes
+
+
+def _managed_access_policy(client_ip: str) -> dict:
+    access_enabled = settings.managed_mode_access_control_enabled
+    ip_whitelisted = _is_ip_whitelisted(client_ip)
+    invite_code_required = access_enabled and (not ip_whitelisted) and bool(settings.managed_mode_invite_codes)
+    return {
+        "access_control_enabled": access_enabled,
+        "ip_whitelisted": ip_whitelisted,
+        "invite_code_required": invite_code_required,
+    }
+
+
+def _enforce_managed_access(*, client_ip: str, invite_code: str) -> None:
+    if not settings.managed_mode_access_control_enabled:
+        return
+    if _is_ip_whitelisted(client_ip):
+        return
+    if settings.managed_mode_invite_codes and _is_invite_code_valid(invite_code):
+        return
+    if settings.managed_mode_invite_codes:
+        raise HTTPException(
+            status_code=403,
+            detail="managed mode is restricted. Please provide a valid invite code or contact admin for whitelist access.",
+        )
+    raise HTTPException(
+        status_code=403,
+        detail="managed mode is restricted to admin whitelist clients.",
+    )
+
+
+def _enforce_managed_run_limits(*, client_ip: str) -> None:
+    runs_payload = orchestrator_list_runs()
+    if not isinstance(runs_payload, list):
+        return
+
+    active_managed = _count_active_managed_runs(runs_payload)
+    if active_managed >= settings.managed_mode_max_active_runs_global:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "managed mode is busy right now: active managed runs reached global limit "
+                f"({settings.managed_mode_max_active_runs_global}). Please retry later."
+            ),
+        )
+
+    active_for_ip = _count_active_managed_runs_for_ip(runs_payload, client_ip)
+    if active_for_ip >= settings.managed_mode_max_active_runs_per_ip:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "managed mode limit reached for current client: active managed runs per IP exceeded "
+                f"({settings.managed_mode_max_active_runs_per_ip}). Please wait for existing runs to finish."
+            ),
+        )
+
+    now = monotonic()
+    with _managed_submit_lock:
+        last_submit = _managed_last_submit_by_ip.get(client_ip, 0.0)
+        elapsed = now - last_submit
+        wait_seconds = settings.managed_mode_min_interval_seconds - elapsed
+        if wait_seconds > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "managed mode cooldown in effect. Please retry in "
+                    f"{int(wait_seconds) + 1}s."
+                ),
+            )
+
+
 @app.post("/api/runs")
-def create_run(payload: RunCreateRequest):
-    return orchestrator_create_run(payload.model_dump())
+def create_run(payload: RunCreateRequest, request: Request):
+    client_ip = _extract_client_ip(request)
+    payload_dict = payload.model_dump()
+    payload_dict["requester_ip"] = client_ip
+    payload_dict.pop("managed_access_code", None)
+
+    is_managed_mode = bool(str(payload.managed_target_model_id or "").strip())
+    if is_managed_mode:
+        _enforce_managed_access(client_ip=client_ip, invite_code=payload.managed_access_code)
+        _enforce_managed_run_limits(client_ip=client_ip)
+
+    created = orchestrator_create_run(payload_dict)
+    if is_managed_mode:
+        with _managed_submit_lock:
+            _managed_last_submit_by_ip[client_ip] = monotonic()
+    return created
 
 
 @app.get("/api/runs")
@@ -122,6 +264,22 @@ def get_quick_attack_methods():
 @app.get("/api/quick-attack/datasets")
 def get_quick_attack_datasets():
     return orchestrator_get_quick_attack_datasets()
+
+
+@app.get("/api/managed-target-models")
+def get_managed_target_models(request: Request):
+    client_ip = _extract_client_ip(request)
+    access_policy = _managed_access_policy(client_ip)
+    data = orchestrator_get_managed_target_models()
+    if not isinstance(data, dict):
+        data = {}
+    data["policy"] = {
+        "max_active_runs_global": settings.managed_mode_max_active_runs_global,
+        "max_active_runs_per_ip": settings.managed_mode_max_active_runs_per_ip,
+        "min_interval_seconds": settings.managed_mode_min_interval_seconds,
+        **access_policy,
+    }
+    return data
 
 
 @app.get("/api/attack/config-options")

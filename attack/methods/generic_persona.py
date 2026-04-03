@@ -306,12 +306,22 @@ class GenericPersonaManager(BaseAttackManager):
         return persona or base
 
     def _extract_query(self, record: Dict[str, Any]) -> Optional[str]:
-        return (
+        query = (
             record.get("query")
             or record.get("prompt")
             or record.get("question")
             or record.get("instruction")
         )
+        if isinstance(query, str):
+            query = query.strip()
+        if query:
+            return query
+        # Compatibility fallback for datasets using different field names.
+        for key in ("goal", "task", "input", "text", "content"):
+            value = record.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     def _build_attack_query(self, query: str) -> str:
         return f"{self.config.attack_prefix}{query}{self.config.attack_suffix}"
@@ -498,33 +508,53 @@ Please provide the shortened system prompt in JSON format as follows:
             return
 
         personas = self._load_initial_personas()
-        scored_personas = self._evolve_personas(personas, records)
-        if not scored_personas:
-            logger.warning("No persona available after initialization/evolution.")
-            return
+        scored_personas: List[Tuple[str, float]] = []
+        persona_fail_reason = ""
+        try:
+            scored_personas = self._evolve_personas(personas, records)
+        except Exception as exc:
+            persona_fail_reason = "persona_evolution_exception"
+            logger.warning(f"Persona evolution failed, fallback to base system prompt: {exc}")
 
-        best_persona, best_proxy_score = scored_personas[0]
-        logger.info(f"Selected persona proxy score: {best_proxy_score:.4f}")
+        if scored_personas:
+            best_persona, best_proxy_score = scored_personas[0]
+            logger.info(f"Selected persona proxy score: {best_proxy_score:.4f}")
+        else:
+            if not persona_fail_reason:
+                persona_fail_reason = "persona_unavailable"
+            logger.warning("No persona available after initialization/evolution. Fallback to base prompt.")
+            best_persona = ""
+            best_proxy_score = 0.0
 
         persona_system_prompt = self._persona_system_prompt(best_persona)
         for example_idx, base_record in enumerate(tqdm(records, desc="GenericPersona Attacking")):
             query = self._extract_query(base_record)
+            fail_reason = persona_fail_reason
             if not query:
-                continue
-
-            final_query = self._build_attack_query(query)
-            input_message = build_messages(
-                final_query,
-                inputs=base_record.get("inputs"),
-                system_prompt=persona_system_prompt,
-            )
-            response = self._chat(
-                self.target_model,
-                input_message,
-                max_tokens=self.config.target_max_n_tokens,
-                temperature=self.config.target_temperature,
-                top_p=self.config.target_top_p,
-            )
+                final_query = ""
+                response = "[MissingQuery]"
+                success = False
+                fail_reason = "missing_query"
+            else:
+                final_query = self._build_attack_query(query)
+                input_message = build_messages(
+                    final_query,
+                    inputs=base_record.get("inputs"),
+                    system_prompt=persona_system_prompt,
+                )
+                response = self._chat(
+                    self.target_model,
+                    input_message,
+                    max_tokens=self.config.target_max_n_tokens,
+                    temperature=self.config.target_temperature,
+                    top_p=self.config.target_top_p,
+                )
+                if not isinstance(response, str) or not response.strip():
+                    response = "[GenerationFailed]"
+                    fail_reason = "empty_response" if not fail_reason else fail_reason
+                    success = False
+                else:
+                    success = not _match_refuse_word(response)
 
             record = dict(base_record)
             record.update(
@@ -537,6 +567,8 @@ Please provide the shortened system prompt in JSON format as follows:
                     "persona_proxy_score": best_proxy_score,
                     "persona_source": self.config.persona_source,
                     "evolution_enabled": bool(self.config.enable_evolution),
+                    "success": bool(success),
+                    "fail_reason": fail_reason,
                 }
             )
             self.save(record)

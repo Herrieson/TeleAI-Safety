@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -428,6 +429,16 @@ def _run_evaluate_stage(run: RunRecord) -> Tuple[bool, str]:
     if manifest_path and manifest_path.exists():
         env["RESULT_MANIFEST"] = str(manifest_path)
 
+    eval_base_url_raw = (env.get("OPENAI_BASE_URL") or "").strip()
+    eval_base_url_hint = ""
+    if eval_base_url_raw:
+        try:
+            parts = urlsplit(eval_base_url_raw)
+            eval_base_url_hint = f"{parts.scheme}://{parts.netloc}{parts.path}"
+        except Exception:
+            eval_base_url_hint = eval_base_url_raw
+    eval_model_hint = (env.get("TELEAI_INTERNAL_EVAL_MODEL") or "").strip()
+
     run_store.update_stage(
         run_id,
         stage,
@@ -451,6 +462,9 @@ def _run_evaluate_stage(run: RunRecord) -> Tuple[bool, str]:
             f"[executor] RESULT_MANIFEST={manifest_path if manifest_path else ''}",
             f"[executor] EVAL_PROFILE={eval_profile}",
             f"[executor] EVAL_REPORT_ROOT={eval_report_root}",
+            f"[executor] use_internal_llm_for_evaluate={settings.use_internal_llm_for_evaluate}",
+            f"[executor] OPENAI_BASE_URL={eval_base_url_hint}",
+            f"[executor] TELEAI_INTERNAL_EVAL_MODEL={eval_model_hint}",
         ],
     )
 
@@ -849,6 +863,8 @@ def _load_metric_summary(eval_root: Path) -> dict:
     asr_vals = []
     asr_effective_vals = []
     frr_vals = []
+    frr_denominator_sum = 0.0
+    frr_signal_rows = 0
     scorers = set()
     attack_runs = set()
     rows = 0
@@ -871,7 +887,12 @@ def _load_metric_summary(eval_root: Path) -> dict:
             except (TypeError, ValueError):
                 pass
             try:
-                frr_vals.append(float(row.get("frr", "")))
+                frr_value = float(row.get("frr", ""))
+                frr_strict_total = float(row.get("frr_strict_total", ""))
+                frr_signal_rows += 1
+                if frr_strict_total > 0:
+                    frr_denominator_sum += frr_strict_total
+                    frr_vals.append(frr_value)
             except (TypeError, ValueError):
                 pass
 
@@ -880,9 +901,17 @@ def _load_metric_summary(eval_root: Path) -> dict:
             return None
         return sum(values) / len(values)
 
+    frr_stats = _load_frr_report_stats(eval_root)
+    frr_denominator_sum += float(frr_stats.get("denominator_sum") or 0.0)
+
     frr_avg = _avg(frr_vals)
-    if frr_avg is None:
+    if frr_avg is None and isinstance(frr_stats.get("avg_frr"), float):
+        frr_avg = frr_stats.get("avg_frr")
+    if frr_avg is None and frr_denominator_sum > 0:
         frr_avg = _load_frr_avg_from_all_metrics(eval_root)
+    frr_denominator_zero = (frr_signal_rows > 0 or int(frr_stats.get("report_count") or 0) > 0) and frr_denominator_sum <= 0
+    if frr_denominator_zero:
+        frr_avg = None
 
     return {
         "rows": rows,
@@ -891,6 +920,7 @@ def _load_metric_summary(eval_root: Path) -> dict:
         "asr_avg": _avg(asr_vals),
         "asr_effective_avg": _avg(asr_effective_vals),
         "frr_avg": frr_avg,
+        "frr_denominator_zero": frr_denominator_zero,
         "scorers": sorted(scorers),
     }
 
@@ -922,6 +952,59 @@ def _load_frr_avg_from_all_metrics(eval_root: Path) -> Optional[float]:
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def _load_frr_report_stats(eval_root: Path) -> Dict[str, Optional[float] | int | float]:
+    frr_root = eval_root / "frr"
+    if not frr_root.exists() or not frr_root.is_dir():
+        return {
+            "report_count": 0,
+            "denominator_sum": 0.0,
+            "avg_frr": None,
+        }
+
+    def _parse_value(line: str, prefix: str) -> Optional[float]:
+        if not line.startswith(prefix):
+            return None
+        raw = line.split(":", 1)[1].strip()
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    report_count = 0
+    denominator_sum = 0.0
+    frr_vals: List[float] = []
+
+    for path in sorted(frr_root.rglob("*.txt")):
+        if not path.is_file():
+            continue
+        strict_total: Optional[float] = None
+        frr_value: Optional[float] = None
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for row in handle:
+                    line = row.strip()
+                    if strict_total is None:
+                        strict_total = _parse_value(line, "FRR denominator (refusal+non_refusal)")
+                    if frr_value is None:
+                        frr_value = _parse_value(line, "False Refusal Rate (FRR)")
+        except OSError:
+            continue
+
+        if strict_total is None:
+            continue
+        report_count += 1
+        if strict_total > 0:
+            denominator_sum += strict_total
+            if frr_value is not None:
+                frr_vals.append(frr_value)
+
+    return {
+        "report_count": report_count,
+        "denominator_sum": denominator_sum,
+        "avg_frr": (sum(frr_vals) / len(frr_vals)) if frr_vals else None,
+    }
 
 
 def _resolve_manifest(run: RunRecord) -> Optional[Path]:

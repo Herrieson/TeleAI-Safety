@@ -45,6 +45,22 @@ function downloadTextFile(filename: string, content: string): void {
   URL.revokeObjectURL(url);
 }
 
+function averageNullable(values: Array<number | null | undefined>): number | null {
+  const nums = values.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+  if (!nums.length) {
+    return null;
+  }
+  return nums.reduce((sum, value) => sum + value, 0) / nums.length;
+}
+
+function sumNullable(values: Array<number | null | undefined>): number | null {
+  const nums = values.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+  if (!nums.length) {
+    return null;
+  }
+  return nums.reduce((sum, value) => sum + value, 0);
+}
+
 export default function RunDetailPage() {
   const { locale } = useI18n();
   const text =
@@ -91,8 +107,11 @@ export default function RunDetailPage() {
           noLogContent: "暂无日志内容。",
           artifacts: "产物",
           metricSummary: "指标汇总",
+          metricSummaryHint: "展示聚合指标与任务级细项；若缺少 MDS/Bias/WSL/CM，说明本次评估产物未生成这些维度。",
           metricNeedEvaluate: "该任务未执行评估。点击“评估此任务”生成指标。",
           noMetricSummary: "暂无指标汇总。",
+          refreshMetrics: "刷新指标",
+          refreshingMetrics: "指标刷新中...",
           tabs: {
             overview: "概览",
             logs: "日志",
@@ -142,8 +161,11 @@ export default function RunDetailPage() {
           noLogContent: "No log content.",
           artifacts: "Artifacts",
           metricSummary: "Metric Summary",
+          metricSummaryHint: "Shows aggregate + task-level metrics. Missing MDS/Bias/WSL/CM usually means this run did not generate those artifacts.",
           metricNeedEvaluate: 'This run did not execute evaluate. Click "Evaluate This Run" to generate metrics.',
           noMetricSummary: "No metric summary generated yet.",
+          refreshMetrics: "Refresh Metrics",
+          refreshingMetrics: "Refreshing metrics...",
           tabs: {
             overview: "overview",
             logs: "logs",
@@ -309,6 +331,72 @@ export default function RunDetailPage() {
     return { total, done, failed };
   }, [run]);
 
+  const derivedMetricSummary = useMemo<Record<string, unknown>>(() => {
+    if (!metricTasks.length) {
+      return {};
+    }
+
+    const scorerSet = new Set<string>();
+    metricTasks.forEach((task) => {
+      const scorer = (task.scorer || "").trim();
+      if (scorer) {
+        scorerSet.add(scorer);
+      }
+    });
+
+    const frrEffectiveValues = metricTasks.map((task) => {
+      const frr = task.frr;
+      const invalid = task.frr_invalid_rate;
+      if (typeof frr !== "number" || !Number.isFinite(frr)) {
+        return null;
+      }
+      if (typeof invalid !== "number" || !Number.isFinite(invalid)) {
+        return frr;
+      }
+      return Math.min(1, Math.max(0, frr + invalid * (1 - frr)));
+    });
+
+    const summary: Record<string, unknown> = {
+      task_count: metricTasks.length,
+      scorer_count: scorerSet.size,
+      scorers: Array.from(scorerSet).sort()
+    };
+
+    const assignIfPresent = (key: string, value: number | null) => {
+      if (value !== null) {
+        summary[key] = value;
+      }
+    };
+
+    assignIfPresent("asr_avg", averageNullable(metricTasks.map((task) => task.asr)));
+    assignIfPresent("asr_strict_avg", averageNullable(metricTasks.map((task) => task.asr_strict)));
+    assignIfPresent("asr_effective_avg", averageNullable(metricTasks.map((task) => task.asr_effective)));
+    assignIfPresent("frr_avg", averageNullable(metricTasks.map((task) => task.frr)));
+    assignIfPresent("frr_invalid_rate_avg", averageNullable(metricTasks.map((task) => task.frr_invalid_rate)));
+    assignIfPresent("frr_effective_avg", averageNullable(frrEffectiveValues));
+    assignIfPresent("total_samples", sumNullable(metricTasks.map((task) => task.total_samples)));
+    assignIfPresent("attack_success_samples", sumNullable(metricTasks.map((task) => task.attack_success_samples)));
+    assignIfPresent("skipped_samples", sumNullable(metricTasks.map((task) => task.skipped_samples)));
+
+    return summary;
+  }, [metricTasks]);
+
+  const mergedMetricSummary = useMemo<Record<string, unknown>>(() => {
+    const base: Record<string, unknown> = {
+      ...((run?.metric_summary as Record<string, unknown>) || {}),
+      ...((metrics?.metric_summary as Record<string, unknown>) || {})
+    };
+    const merged: Record<string, unknown> = { ...base };
+    Object.entries(derivedMetricSummary).forEach(([key, value]) => {
+      const current = merged[key];
+      if (current === undefined || current === null || current === "") {
+        merged[key] = value;
+      }
+    });
+    return merged;
+  }, [derivedMetricSummary, metrics?.metric_summary, run?.metric_summary]);
+  const frrUnavailable = mergedMetricSummary.frr_denominator_zero === true;
+
   async function handleCancel() {
     if (!run) {
       return;
@@ -386,7 +474,7 @@ export default function RunDetailPage() {
   }
 
   return (
-    <section aria-busy={loading || runRefreshing || logsRefreshing} className="space-y-4">
+    <section aria-busy={loading || runRefreshing || logsRefreshing || metricsLoading} className="space-y-4">
       <div className="panel p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -602,13 +690,25 @@ export default function RunDetailPage() {
 
       {tab === "metrics" ? (
         <article className="panel p-4">
-          <p className="label mb-3">{text.metricSummary}</p>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="label">{text.metricSummary}</p>
+            <button
+              className={metricsLoading ? "btn btn-busy" : "btn"}
+              disabled={metricsLoading}
+              onClick={() => void loadMetrics()}
+              type="button"
+            >
+              {metricsLoading ? text.refreshingMetrics : text.refreshMetrics}
+            </button>
+          </div>
+          <p className="mb-3 text-xs text-slate-600">{text.metricSummaryHint}</p>
           <MetricCards
             emptyMessage={run.mode === "attack_only" ? text.metricNeedEvaluate : text.noMetricSummary}
-            summary={metrics?.metric_summary || run.metric_summary || {}}
+            summary={mergedMetricSummary}
           />
           <EvaluationTaskTable
             exportingTaskId={exportingTaskId}
+            frrUnavailable={frrUnavailable}
             loading={metricsLoading}
             onExport={(taskId) => void handleExportMetricTask(taskId)}
             tasks={metricTasks}

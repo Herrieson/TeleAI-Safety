@@ -42,6 +42,43 @@
 5. `TELEAI_USE_INTERNAL_LLM_FOR_EVALUATE`（默认 `true`）
 6. `TELEAI_STRICT_CRED_ISOLATION`（默认 `true`，开启后禁止从 target 凭据回退）
 
+托管模式（Managed Mode）配置：
+
+1. Orchestrator 模型池：
+   - `TELEAI_MANAGED_TARGET_MODELS`
+   - 为空时，会回退为基于 `TELEAI_INTERNAL_LLM_BASE_URL` + `TELEAI_INTERNAL_LLM_API_KEY` 的默认托管模型列表（`gpt-5.4/gpt-5.2/gpt-4o/gpt-4o-mini`）。
+2. BFF 资源保护（仅对托管模式生效）：
+   - `BFF_MANAGED_MODE_MAX_ACTIVE_RUNS_GLOBAL`（全局并发上限，默认 `6`）
+   - `BFF_MANAGED_MODE_MAX_ACTIVE_RUNS_PER_IP`（单 IP 并发上限，默认 `2`）
+   - `BFF_MANAGED_MODE_MIN_INTERVAL_SECONDS`（单 IP 提交冷却秒数，默认 `300`）
+3. BFF 访问控制：
+   - `BFF_MANAGED_MODE_ACCESS_CONTROL_ENABLED`（默认 `false`）
+   - `BFF_MANAGED_MODE_IP_WHITELIST`（逗号分隔，默认 `127.0.0.1,::1`）
+   - `BFF_MANAGED_MODE_INVITE_CODES`（逗号分隔；开启访问控制后，白名单外用户可用邀请码访问）
+
+`TELEAI_MANAGED_TARGET_MODELS` 示例（JSON 字符串）：
+
+```bash
+TELEAI_MANAGED_TARGET_MODELS='[
+  {
+    "id": "gpt-5-4-prod",
+    "label": "GPT-5.4 生产池",
+    "target_model_name": "gpt-5.4",
+    "base_url": "https://your-internal-llm-gateway/v1",
+    "api_key": "sk-internal-***",
+    "description": "高优先级评估模型"
+  },
+  {
+    "id": "gpt-4o-mini-canary",
+    "label": "GPT-4o-mini Canary",
+    "target_model_name": "gpt-4o-mini",
+    "base_url": "https://your-internal-llm-gateway/v1",
+    "api_key": "sk-internal-***",
+    "description": "低成本回归模型"
+  }
+]'
+```
+
 额外约束（防止结果污染）：
 
 1. `mode=eval_only` 时必须显式提供 `result_manifest`
@@ -83,6 +120,7 @@ BFF_CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 9. `GET /v1/runs/{run_id}/metrics/summary`
 10. `GET /v1/quick-attack/methods`
 11. `GET /v1/quick-attack/datasets`
+12. `GET /v1/managed-target-models`
 
 ### BFF
 
@@ -98,6 +136,7 @@ BFF_CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 10. `GET /api/runs/{run_id}/metrics/summary`
 11. `GET /api/quick-attack/methods`
 12. `GET /api/quick-attack/datasets`
+13. `GET /api/managed-target-models`
 
 ## 下一步
 
@@ -118,5 +157,19 @@ BFF_CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
   "quick_openai_api_key": "sk-***",
   "quick_attack_methods": ["pair", "cipher", "rene"],
   "quick_dataset_key": "teleai_samples_500_500"
+}
+```
+
+## Managed Mode 请求示例
+
+```json
+{
+  "name": "managed-gpt54-nightly",
+  "mode": "full_pipeline",
+  "quick_attack_enabled": true,
+  "quick_attack_methods": ["pair", "cipher", "rene"],
+  "quick_dataset_key": "teleai_samples_500_500",
+  "managed_target_model_id": "gpt-5-4-prod",
+  "managed_access_code": "optional-invite-code"
 }
 ```

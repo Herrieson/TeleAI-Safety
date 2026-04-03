@@ -7,6 +7,7 @@ import {
   getAttackConfigOptions,
   getBenchmarkConfigOptions,
   createRun,
+  getManagedTargetModels,
   getQuickAttackDatasets,
   getQuickAttackMethods,
   getRuns
@@ -14,7 +15,7 @@ import {
 import { useI18n } from "@/components/common/LocaleProvider";
 import { formatRunMode, formatStageName } from "@/lib/i18n";
 import { getAttackMethodInfo } from "@/lib/attackMethodInfo";
-import type { QuickAttackDataset, Run, RunCreatePayload, RunMode } from "@/lib/types";
+import type { ManagedModePolicy, ManagedTargetModel, QuickAttackDataset, Run, RunCreatePayload, RunMode } from "@/lib/types";
 
 const fallbackMethodOptions = [
   "artprompt",
@@ -40,7 +41,9 @@ const defaultPayload: RunCreatePayload = {
   quick_openai_base_url: "",
   quick_openai_api_key: "",
   quick_attack_methods: ["pair", "cipher", "rene"],
-  quick_dataset_key: "teleai_samples_500_500"
+  quick_dataset_key: "teleai_samples_500_500",
+  managed_target_model_id: "",
+  managed_access_code: ""
 };
 
 const runModeOptions: RunMode[] = ["attack_only", "eval_only", "full_pipeline", "benchmark_only"];
@@ -105,9 +108,21 @@ export default function NewRunPage() {
           methodRepo: "源码",
           methodNoRef: "暂无公开链接",
           simpleMode: "简洁模式",
+          managedMode: "平台托管模式",
           advancedMode: "高级模式",
           simpleModeTitle: "一键完整测试（默认）",
           simpleModeDesc: "需填写目标模型名称和 API 凭证，系统将自动执行攻击 + 基准测试 + 评估完整流程。",
+          managedModeTitle: "平台托管模型测试",
+          managedModeDesc: "从平台托管模型列表中选择目标，无需填写 Base URL / API Key，系统使用托管资源执行完整测试流程。",
+          managedTargetModel: "托管被测模型",
+          managedSelectPlaceholder: "请选择托管模型",
+          managedNoModels: "当前暂无可用托管模型，请联系管理员配置。",
+          managedPolicy: "资源限制",
+          managedPolicyHint: (global: number, perIp: number, cooldown: number) =>
+            `全局并发上限 ${global}，单客户端并发上限 ${perIp}，同一客户端提交冷却 ${cooldown} 秒。`,
+          managedAccessCode: "邀请码",
+          managedAccessCodeHint: "管理员白名单之外的用户需输入邀请码。",
+          errManagedModel: "请选择托管被测模型。",
           simpleAutoPlanTitle: "自动测试计划",
           simpleAutoMode: "运行模式",
           simpleAutoStages: "执行阶段",
@@ -190,9 +205,21 @@ export default function NewRunPage() {
           methodRepo: "Source",
           methodNoRef: "No public links",
           simpleMode: "Simple",
+          managedMode: "Managed",
           advancedMode: "Advanced",
           simpleModeTitle: "One-click Full Test (Default)",
           simpleModeDesc: "Target model name and API credentials are required. The system will run attack + benchmark + evaluate automatically.",
+          managedModeTitle: "Managed Model Test",
+          managedModeDesc: "Select target model from managed list. No Base URL / API Key required. The platform credentials are used for the full test pipeline.",
+          managedTargetModel: "Managed Target Model",
+          managedSelectPlaceholder: "Select managed model",
+          managedNoModels: "No managed target models available. Ask admin to configure them first.",
+          managedPolicy: "Resource Policy",
+          managedPolicyHint: (global: number, perIp: number, cooldown: number) =>
+            `Global active limit ${global}, per-client active limit ${perIp}, client submit cooldown ${cooldown}s.`,
+          managedAccessCode: "Invite Code",
+          managedAccessCodeHint: "Users outside admin whitelist need an invite code.",
+          errManagedModel: "Please select a managed target model.",
           simpleAutoPlanTitle: "Auto Test Plan",
           simpleAutoMode: "Run Mode",
           simpleAutoStages: "Stages",
@@ -271,18 +298,22 @@ export default function NewRunPage() {
   const [benchmarkConfigOptions, setBenchmarkConfigOptions] = useState<string[]>(["benchmark/configs/run.yaml"]);
   const [benchmarkManualPathEnabled, setBenchmarkManualPathEnabled] = useState(false);
   const [simpleMode, setSimpleMode] = useState(true);
+  const [managedMode, setManagedMode] = useState(false);
+  const [managedTargetModels, setManagedTargetModels] = useState<ManagedTargetModel[]>([]);
+  const [managedPolicy, setManagedPolicy] = useState<ManagedModePolicy | null>(null);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
       setInitializing(true);
-      const [methodsResult, datasetsResult, runsResult, attackConfigResult, benchmarkConfigResult] =
+      const [methodsResult, datasetsResult, runsResult, attackConfigResult, benchmarkConfigResult, managedModelsResult] =
         await Promise.allSettled([
           getQuickAttackMethods(),
           getQuickAttackDatasets(),
           getRuns(),
           getAttackConfigOptions(),
-          getBenchmarkConfigOptions()
+          getBenchmarkConfigOptions(),
+          getManagedTargetModels()
         ]);
 
       if (!alive) {
@@ -340,6 +371,21 @@ export default function NewRunPage() {
         }
       }
 
+      if (managedModelsResult.status === "fulfilled") {
+        const models = (managedModelsResult.value.models || []).filter((item) => !!item.id && !!item.target_model_name);
+        setManagedTargetModels(models);
+        setManagedPolicy(managedModelsResult.value.policy || null);
+        if (models.length > 0) {
+          setPayload((prev) => ({
+            ...prev,
+            managed_target_model_id: prev.managed_target_model_id && models.some((item) => item.id === prev.managed_target_model_id)
+              ? prev.managed_target_model_id
+              : models[0].id,
+            quick_target_model_name: prev.quick_target_model_name || models[0].target_model_name
+          }));
+        }
+      }
+
       setInitializing(false);
     })();
 
@@ -357,6 +403,11 @@ export default function NewRunPage() {
     () => datasetOptions.find((item) => item.key === payload.quick_dataset_key) || null,
     [datasetOptions, payload.quick_dataset_key]
   );
+  const selectedManagedModel = useMemo(
+    () => managedTargetModels.find((item) => item.id === payload.managed_target_model_id) || null,
+    [managedTargetModels, payload.managed_target_model_id]
+  );
+  const managedInviteCodeRequired = !!managedPolicy?.invite_code_required;
   const selectedManifestSourceRun = useMemo(
     () => manifestSourceRuns.find((run) => run.run_id === manifestSourceRunId) || null,
     [manifestSourceRunId, manifestSourceRuns]
@@ -447,6 +498,44 @@ export default function NewRunPage() {
     event.preventDefault();
     setError("");
 
+    if (managedMode) {
+      const managedId = payload.managed_target_model_id?.trim() || selectedManagedModel?.id || "";
+      if (!managedId) {
+        setError(text.errManagedModel);
+        return;
+      }
+      const modelName = selectedManagedModel?.target_model_name || payload.quick_target_model_name || "gpt-4o-mini";
+      const submitPayload: RunCreatePayload = {
+        ...payload,
+        mode: "full_pipeline",
+        attack_config_dir: "__AUTO__",
+        benchmark_config_path: autoBenchmarkConfigPath,
+        eval_profile: "full",
+        result_manifest: "",
+        results_root: payload.results_root.trim() || "data/attack_results",
+        quick_attack_enabled: true,
+        quick_openai_base_url: "",
+        quick_openai_api_key: "",
+        quick_target_model_name: modelName,
+        quick_attack_methods: [...autoMethodList],
+        quick_dataset_key: autoDatasetKey,
+        managed_target_model_id: managedId,
+        managed_access_code: (payload.managed_access_code || "").trim()
+      };
+
+      setSubmitting(true);
+      try {
+        const run = await createRun(submitPayload);
+        router.push(`/runs/${run.run_id}`);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err);
+        setError(message);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (simpleMode) {
       if (!payload.quick_target_model_name.trim()) {
         setError(text.errSimpleTargetModel);
@@ -470,7 +559,9 @@ export default function NewRunPage() {
         quick_openai_api_key: payload.quick_openai_api_key.trim(),
         quick_target_model_name: payload.quick_target_model_name.trim(),
         quick_attack_methods: [...autoMethodList],
-        quick_dataset_key: autoDatasetKey
+        quick_dataset_key: autoDatasetKey,
+        managed_target_model_id: "",
+        managed_access_code: ""
       };
 
       setSubmitting(true);
@@ -547,7 +638,9 @@ export default function NewRunPage() {
       quick_openai_api_key: includeTargetCreds ? payload.quick_openai_api_key.trim() : "",
       quick_target_model_name: includeTargetModel ? payload.quick_target_model_name.trim() || "gpt-4o-mini" : "gpt-4o-mini",
       quick_attack_methods: isAttackMode ? payload.quick_attack_methods : [],
-      quick_dataset_key: isAttackMode ? payload.quick_dataset_key : "teleai_samples_500_500"
+      quick_dataset_key: isAttackMode ? payload.quick_dataset_key : "teleai_samples_500_500",
+      managed_target_model_id: "",
+      managed_access_code: ""
     };
 
     setSubmitting(true);
@@ -586,9 +679,11 @@ export default function NewRunPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
-          className={simpleMode ? "btn btn-primary" : "btn"}
+          className={!managedMode && simpleMode ? "btn btn-primary" : "btn"}
           onClick={() => {
             setSimpleMode(true);
+            setManagedMode(false);
+            setPayload((prev) => ({ ...prev, managed_target_model_id: "", managed_access_code: "" }));
             setError("");
           }}
           type="button"
@@ -596,9 +691,34 @@ export default function NewRunPage() {
           {text.simpleMode}
         </button>
         <button
-          className={!simpleMode ? "btn btn-primary" : "btn"}
+          className={managedMode ? "btn btn-primary" : "btn"}
+          onClick={() => {
+            setManagedMode(true);
+            setSimpleMode(false);
+            setPayload((prev) => {
+              const hasCurrent = prev.managed_target_model_id && managedTargetModels.some((item) => item.id === prev.managed_target_model_id);
+              const first = managedTargetModels[0] || null;
+              const nextModel = hasCurrent
+                ? managedTargetModels.find((item) => item.id === prev.managed_target_model_id) || first
+                : first;
+              return {
+                ...prev,
+                managed_target_model_id: nextModel?.id || "",
+                quick_target_model_name: nextModel?.target_model_name || prev.quick_target_model_name
+              };
+            });
+            setError("");
+          }}
+          type="button"
+        >
+          {text.managedMode}
+        </button>
+        <button
+          className={!managedMode && !simpleMode ? "btn btn-primary" : "btn"}
           onClick={() => {
             setSimpleMode(false);
+            setManagedMode(false);
+            setPayload((prev) => ({ ...prev, managed_target_model_id: "", managed_access_code: "" }));
             setError("");
           }}
           type="button"
@@ -608,7 +728,162 @@ export default function NewRunPage() {
       </div>
 
       <form aria-busy={submitting || initializing} onSubmit={onSubmit}>
-        {simpleMode ? (
+        {managedMode ? (
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+            <div className="space-y-5 xl:col-span-8 reveal-grid">
+              <article className="section-card">
+                <p className="label mb-3">{text.managedModeTitle}</p>
+                <p className="mb-4 text-sm text-slate-600">{text.managedModeDesc}</p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <label>
+                    <span className="label mb-1 block">{text.runNameOptional}</span>
+                    <input
+                      className="input"
+                      onChange={(event) => setPayload((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="e.g. managed-gpt54-nightly"
+                      value={payload.name}
+                    />
+                  </label>
+                  <label>
+                    <span className="label mb-1 block">{text.managedTargetModel}</span>
+                    <select
+                      className="select"
+                      onChange={(event) => {
+                        const model = managedTargetModels.find((item) => item.id === event.target.value) || null;
+                        setPayload((prev) => ({
+                          ...prev,
+                          managed_target_model_id: event.target.value,
+                          quick_target_model_name: model?.target_model_name || prev.quick_target_model_name
+                        }));
+                      }}
+                      value={payload.managed_target_model_id || ""}
+                    >
+                      <option value="">{managedTargetModels.length ? text.managedSelectPlaceholder : text.managedNoModels}</option>
+                      {managedTargetModels.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedManagedModel?.description ? (
+                      <p className="mt-1 text-xs text-slate-600">{selectedManagedModel.description}</p>
+                    ) : null}
+                  </label>
+                  {managedPolicy?.access_control_enabled ? (
+                    <label className="md:col-span-2">
+                      <span className="label mb-1 block">{text.managedAccessCode}</span>
+                      <input
+                        className="input mono"
+                        onChange={(event) => setPayload((prev) => ({ ...prev, managed_access_code: event.target.value }))}
+                        placeholder={managedInviteCodeRequired ? "required-invite-code" : "optional-invite-code"}
+                        value={payload.managed_access_code || ""}
+                      />
+                      <p className="mt-1 text-xs text-slate-600">{text.managedAccessCodeHint}</p>
+                    </label>
+                  ) : null}
+                </div>
+                {managedPolicy ? (
+                  <p className="tech-subpanel mt-4 p-3 text-sm text-slate-700">
+                    {text.managedPolicyHint(
+                      managedPolicy.max_active_runs_global,
+                      managedPolicy.max_active_runs_per_ip,
+                      managedPolicy.min_interval_seconds
+                    )}
+                  </p>
+                ) : null}
+              </article>
+
+              {error ? (
+                <p aria-live="assertive" className="notice notice-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  className={submitting ? "btn btn-primary btn-busy" : "btn btn-primary"}
+                  disabled={
+                    submitting ||
+                    initializing ||
+                    !managedTargetModels.length ||
+                    (managedInviteCodeRequired && !(payload.managed_access_code || "").trim())
+                  }
+                  type="submit"
+                >
+                  {submitting ? text.submitting : initializing ? text.preparing : text.simpleSubmit}
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    const first = managedTargetModels[0] || null;
+                    setPayload({
+                      ...defaultPayload,
+                      managed_target_model_id: first?.id || "",
+                      quick_target_model_name: first?.target_model_name || ""
+                    });
+                    setManifestSourceRunId("");
+                    setBenchmarkManualPathEnabled(false);
+                    setManagedMode(true);
+                    setSimpleMode(false);
+                    setError("");
+                  }}
+                  type="button"
+                >
+                  {text.reset}
+                </button>
+              </div>
+            </div>
+
+            <aside className="space-y-4 xl:col-span-4 xl:sticky xl:top-6 xl:self-start reveal-grid">
+              <article className="stat-card">
+                <p className="label mb-2">{text.simpleAutoPlanTitle}</p>
+                <dl className="space-y-2 text-sm text-slate-700">
+                  <div>
+                    <dt className="label">{text.simpleAutoMode}</dt>
+                    <dd>{formatRunMode("full_pipeline", locale)}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoStages}</dt>
+                    <dd className="mono text-xs">{autoStageSummary}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.targetModel}</dt>
+                    <dd>{selectedManagedModel?.target_model_name || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoDataset}</dt>
+                    <dd className="mono text-xs">{autoDatasetKey}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoMethods}</dt>
+                    <dd>{autoMethodList.length}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoBenchmark}</dt>
+                    <dd className="mono text-xs">{autoBenchmarkConfigPath}</dd>
+                  </div>
+                  <div>
+                    <dt className="label">{text.simpleAutoEval}</dt>
+                    <dd>full</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article className="stat-card">
+                <p className="label mb-2">{text.managedPolicy}</p>
+                <p className="text-xs text-slate-600">
+                  {managedPolicy
+                    ? text.managedPolicyHint(
+                        managedPolicy.max_active_runs_global,
+                        managedPolicy.max_active_runs_per_ip,
+                        managedPolicy.min_interval_seconds
+                      )
+                    : "-"}
+                </p>
+              </article>
+            </aside>
+          </div>
+        ) : simpleMode ? (
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
             <div className="space-y-5 xl:col-span-8 reveal-grid">
               <article className="section-card">
@@ -678,6 +953,7 @@ export default function NewRunPage() {
                     setManifestSourceRunId("");
                     setBenchmarkManualPathEnabled(false);
                     setSimpleMode(true);
+                    setManagedMode(false);
                     setError("");
                   }}
                   type="button"
@@ -1122,6 +1398,7 @@ export default function NewRunPage() {
                   setManifestSourceRunId("");
                   setBenchmarkManualPathEnabled(false);
                   setSimpleMode(true);
+                  setManagedMode(false);
                   setError("");
                 }}
                 type="button"

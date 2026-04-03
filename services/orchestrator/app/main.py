@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -43,13 +43,17 @@ def health() -> dict:
 
 @app.post("/v1/runs", response_model=RunRecord)
 def create_run(payload: RunCreate) -> RunRecord:
-    run = new_run_record(payload)
+    resolved_payload, resolve_err = _resolve_run_payload_with_managed_target(payload)
+    if resolve_err:
+        raise HTTPException(status_code=400, detail=resolve_err)
+
+    run = new_run_record(resolved_payload)
     created = run_store.add(run)
-    if payload.quick_openai_api_key.strip():
+    if resolved_payload.quick_openai_api_key.strip():
         secret_store.set(
             created.run_id,
             {
-                "quick_openai_api_key": payload.quick_openai_api_key.strip(),
+                "quick_openai_api_key": resolved_payload.quick_openai_api_key.strip(),
             },
         )
     start_run_execution(created.run_id)
@@ -120,9 +124,13 @@ def get_metric_summary(run_id: str):
     run = run_store.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+    summary = dict(run.metric_summary or {})
+    derived = _load_metric_summary_from_eval_reports(run_id)
+    if derived:
+        summary.update(derived)
     return {
         "run_id": run_id,
-        "metric_summary": run.metric_summary,
+        "metric_summary": summary,
     }
 
 
@@ -295,6 +303,7 @@ def _load_metric_tasks(run_id: str) -> List[Dict[str, object]]:
     summary_path = eval_root / "asr" / "summary_long.csv"
     if not summary_path.exists() or not summary_path.is_file():
         return []
+    frr_by_attack = _load_frr_by_attack(eval_root)
 
     rows: List[Dict[str, object]] = []
     try:
@@ -302,15 +311,32 @@ def _load_metric_tasks(run_id: str) -> List[Dict[str, object]]:
             reader = csv.DictReader(handle)
             for idx, row in enumerate(reader, start=1):
                 attack_group = (row.get("attack_group") or "").strip()
+                attack_run = (row.get("attack_run") or "").strip()
                 scorer = (row.get("scorer") or "").strip()
                 report_rel = (row.get("report_path") or "").strip()
                 report_file = _safe_path_in_dir(eval_root / "asr", report_rel)
                 input_file = (row.get("input_file") or "").strip()
+                frr = _to_float(row.get("frr"))
+                frr_invalid_rate = _to_float(row.get("frr_invalid_rate"))
+                frr_strict_total = _to_float(row.get("frr_strict_total"))
+                attack_key = attack_group or attack_run.split("/", 1)[0]
+                if attack_key and attack_key in frr_by_attack:
+                    fallback = frr_by_attack[attack_key]
+                    if frr is None:
+                        frr = fallback.get("frr")
+                    if frr_invalid_rate is None:
+                        frr_invalid_rate = fallback.get("invalid_rate")
+                    if frr_strict_total is None:
+                        frr_strict_total = fallback.get("strict_total")
+                if frr_strict_total is not None and frr_strict_total <= 0:
+                    # Denominator is zero, so FRR should be treated as unavailable.
+                    frr = None
+                    frr_invalid_rate = None
 
                 rows.append(
                     {
                         "task_id": str(idx),
-                        "attack_run": (row.get("attack_run") or "").strip(),
+                        "attack_run": attack_run,
                         "attack_group": attack_group,
                         "scorer": scorer,
                         "total_samples": _to_int(row.get("total_samples")),
@@ -319,8 +345,8 @@ def _load_metric_tasks(run_id: str) -> List[Dict[str, object]]:
                         "asr": _to_float(row.get("asr")),
                         "asr_strict": _to_float(row.get("asr_strict")),
                         "asr_effective": _to_float(row.get("asr_effective")),
-                        "frr": _to_float(row.get("frr")),
-                        "frr_invalid_rate": _to_float(row.get("frr_invalid_rate")),
+                        "frr": frr,
+                        "frr_invalid_rate": frr_invalid_rate,
                         "report_path": report_rel,
                         "input_file": input_file,
                         "_report_file": str(report_file) if report_file else "",
@@ -332,6 +358,139 @@ def _load_metric_tasks(run_id: str) -> List[Dict[str, object]]:
         return []
 
     return rows
+
+
+def _load_metric_summary_from_eval_reports(run_id: str) -> Dict[str, object]:
+    eval_root = _run_eval_report_root(run_id)
+    summary_long = eval_root / "asr" / "summary_long.csv"
+    all_metrics = eval_root / "all_metrics_summary.csv"
+    if not summary_long.exists() and not all_metrics.exists():
+        return {}
+
+    asr_vals: List[float] = []
+    asr_strict_vals: List[float] = []
+    asr_effective_vals: List[float] = []
+    frr_vals: List[float] = []
+    frr_invalid_rate_vals: List[float] = []
+    frr_effective_vals: List[float] = []
+    frr_denominator_total = 0.0
+    frr_signal_rows = 0
+    scorers: set[str] = set()
+    attack_runs: set[str] = set()
+    rows = 0
+
+    if summary_long.exists():
+        try:
+            with summary_long.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    rows += 1
+                    attack_run = (row.get("attack_run") or "").strip()
+                    scorer = (row.get("scorer") or "").strip()
+                    if attack_run:
+                        attack_runs.add(attack_run)
+                    if scorer:
+                        scorers.add(scorer)
+
+                    asr = _to_float(row.get("asr"))
+                    asr_strict = _to_float(row.get("asr_strict"))
+                    asr_effective = _to_float(row.get("asr_effective"))
+                    frr = _to_float(row.get("frr"))
+                    frr_invalid = _to_float(row.get("frr_invalid_rate"))
+                    frr_strict_total = _to_float(row.get("frr_strict_total"))
+
+                    if asr is not None:
+                        asr_vals.append(asr)
+                    if asr_strict is not None:
+                        asr_strict_vals.append(asr_strict)
+                    if asr_effective is not None:
+                        asr_effective_vals.append(asr_effective)
+                    has_frr_signal = frr is not None or frr_invalid is not None or frr_strict_total is not None
+                    if has_frr_signal:
+                        frr_signal_rows += 1
+                    if frr_strict_total is not None and frr_strict_total > 0:
+                        frr_denominator_total += frr_strict_total
+
+                    row_frr_available = frr_strict_total is None or frr_strict_total > 0
+                    if row_frr_available and frr is not None:
+                        frr_vals.append(frr)
+                        if frr_invalid is not None:
+                            frr_effective = min(1.0, max(0.0, frr + frr_invalid * (1.0 - frr)))
+                            frr_effective_vals.append(frr_effective)
+                    if row_frr_available and frr_invalid is not None:
+                        frr_invalid_rate_vals.append(frr_invalid)
+        except OSError:
+            pass
+
+    frr_report_stats = _load_frr_report_stats(eval_root)
+    frr_denominator_total += frr_report_stats["denominator_sum"]
+
+    if not frr_vals and frr_report_stats["avg_frr"] is not None:
+        frr_vals.append(frr_report_stats["avg_frr"])
+    if not frr_invalid_rate_vals and frr_report_stats["avg_invalid_rate"] is not None:
+        frr_invalid_rate_vals.append(frr_report_stats["avg_invalid_rate"])
+    if not frr_effective_vals and frr_report_stats["avg_frr_effective"] is not None:
+        frr_effective_vals.append(frr_report_stats["avg_frr_effective"])
+
+    model_rows: List[Dict[str, str]] = []
+    if all_metrics.exists():
+        try:
+            with all_metrics.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    if ((row.get("record_type") or "").strip().lower() == "model"):
+                        model_rows.append(row)
+        except OSError:
+            pass
+
+    mds_vals = [_to_float(row.get("mds")) for row in model_rows]
+    bias_vals = [_to_float(row.get("bias")) for row in model_rows]
+    wsl_vals = [_to_float(row.get("wsl")) for row in model_rows]
+    cm_vals = [_to_float(row.get("cm")) for row in model_rows]
+    kappa_vals = [_to_float(row.get("avg_kappa")) for row in model_rows]
+    artifact_fallbacks = _load_metric_fallbacks_from_artifacts(eval_root)
+
+    mds_avg = _mean([item for item in mds_vals if item is not None])
+    if mds_avg is None:
+        mds_avg = artifact_fallbacks.get("mds_avg")
+    bias_avg = _mean([item for item in bias_vals if item is not None])
+    if bias_avg is None:
+        bias_avg = artifact_fallbacks.get("bias_avg")
+    wsl_avg = _mean([item for item in wsl_vals if item is not None])
+    if wsl_avg is None:
+        wsl_avg = artifact_fallbacks.get("wsl_avg")
+    cm_avg = _mean([item for item in cm_vals if item is not None])
+    if cm_avg is None:
+        cm_avg = artifact_fallbacks.get("cm_avg")
+
+    has_frr_signal = frr_signal_rows > 0 or frr_report_stats["report_count"] > 0
+    frr_denominator_zero = has_frr_signal and frr_denominator_total <= 0
+
+    out: Dict[str, object] = {
+        "rows": rows,
+        "attack_run_count": len(attack_runs),
+        "scorer_count": len(scorers),
+        "scorers": sorted(scorers),
+        "asr_avg": _mean(asr_vals),
+        "asr_strict_avg": _mean(asr_strict_vals),
+        "asr_effective_avg": _mean(asr_effective_vals),
+        "frr_avg": None if frr_denominator_zero else _mean(frr_vals),
+        "frr_invalid_rate_avg": None if frr_denominator_zero else _mean(frr_invalid_rate_vals),
+        "frr_effective_avg": None if frr_denominator_zero else _mean(frr_effective_vals),
+        "frr_denominator_zero": frr_denominator_zero,
+        "mds_avg": mds_avg,
+        "bias_avg": bias_avg,
+        "wsl_avg": wsl_avg,
+        "cm_avg": cm_avg,
+        "avg_kappa": _mean([item for item in kappa_vals if item is not None]),
+    }
+    filtered = {key: value for key, value in out.items() if value is not None}
+    if frr_denominator_zero:
+        filtered["frr_denominator_zero"] = True
+        filtered["frr_avg"] = None
+        filtered["frr_invalid_rate_avg"] = None
+        filtered["frr_effective_avg"] = None
+    return filtered
 
 
 def _public_metric_task(task: Dict[str, object]) -> Dict[str, object]:
@@ -438,6 +597,56 @@ def _build_metric_task_report(run: RunRecord, task: Dict[str, object]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _public_managed_target_models() -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    for item in settings.managed_target_models:
+        model_id = str(item.get("id") or "").strip()
+        model_name = str(item.get("target_model_name") or "").strip()
+        if not model_id or not model_name:
+            continue
+        rows.append(
+            {
+                "id": model_id,
+                "label": str(item.get("label") or model_name).strip(),
+                "target_model_name": model_name,
+                "description": str(item.get("description") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _find_managed_target_model(model_id: str) -> Optional[Dict[str, object]]:
+    wanted = (model_id or "").strip()
+    if not wanted:
+        return None
+    for item in settings.managed_target_models:
+        if str(item.get("id") or "").strip() == wanted:
+            return item
+    return None
+
+
+def _resolve_run_payload_with_managed_target(payload: RunCreate) -> Tuple[RunCreate, str]:
+    model_id = (payload.managed_target_model_id or "").strip()
+    if not model_id:
+        return payload, ""
+
+    managed = _find_managed_target_model(model_id)
+    if managed is None:
+        return payload, f"managed target model not found: {model_id}"
+
+    raw = payload.model_dump()
+    raw["managed_target_model_id"] = model_id
+    raw["quick_target_model_name"] = str(managed.get("target_model_name") or "").strip()
+    raw["quick_openai_base_url"] = str(managed.get("base_url") or "").strip()
+    raw["quick_openai_api_key"] = str(managed.get("api_key") or "").strip()
+    if not raw["quick_target_model_name"] or not raw["quick_openai_base_url"] or not raw["quick_openai_api_key"]:
+        return payload, f"managed target model config incomplete: {model_id}"
+    try:
+        return RunCreate.model_validate(raw), ""
+    except Exception as exc:
+        return payload, f"managed target model payload validation failed: {exc}"
+
+
 def _safe_path_in_dir(base: Path, rel_path: str) -> Optional[Path]:
     rel = (rel_path or "").strip()
     if not rel:
@@ -531,6 +740,194 @@ def _mean(values: List[float]) -> Optional[float]:
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def _load_frr_report_stats(eval_root: Path) -> Dict[str, Optional[float] | int | float]:
+    frr_root = eval_root / "frr"
+    if not frr_root.exists() or not frr_root.is_dir():
+        return {
+            "report_count": 0,
+            "denominator_sum": 0.0,
+            "avg_frr": None,
+            "avg_invalid_rate": None,
+            "avg_frr_effective": None,
+        }
+
+    def _parse_value(line: str, prefix: str) -> Optional[float]:
+        if not line.startswith(prefix):
+            return None
+        raw = line.split(":", 1)[1].strip()
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    report_count = 0
+    denominator_sum = 0.0
+    frr_vals: List[float] = []
+    invalid_rate_vals: List[float] = []
+    effective_vals: List[float] = []
+
+    for path in sorted(frr_root.rglob("*.txt")):
+        if not path.is_file():
+            continue
+        strict_total: Optional[float] = None
+        frr_value: Optional[float] = None
+        invalid_value: Optional[float] = None
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for row in handle:
+                    line = row.strip()
+                    if strict_total is None:
+                        strict_total = _parse_value(line, "FRR denominator (refusal+non_refusal)")
+                    if frr_value is None:
+                        frr_value = _parse_value(line, "False Refusal Rate (FRR)")
+                    if invalid_value is None:
+                        invalid_value = _parse_value(line, "Invalid Output Rate")
+        except OSError:
+            continue
+
+        if strict_total is None:
+            continue
+        report_count += 1
+        if strict_total > 0:
+            denominator_sum += strict_total
+        if strict_total > 0 and frr_value is not None:
+            frr_vals.append(frr_value)
+            if invalid_value is not None:
+                invalid_rate_vals.append(invalid_value)
+                effective_vals.append(min(1.0, max(0.0, frr_value + invalid_value * (1.0 - frr_value))))
+
+    return {
+        "report_count": report_count,
+        "denominator_sum": denominator_sum,
+        "avg_frr": _mean(frr_vals),
+        "avg_invalid_rate": _mean(invalid_rate_vals),
+        "avg_frr_effective": _mean(effective_vals),
+    }
+
+
+def _load_metric_fallbacks_from_artifacts(eval_root: Path) -> Dict[str, Optional[float]]:
+    out: Dict[str, Optional[float]] = {
+        "mds_avg": None,
+        "bias_avg": None,
+        "wsl_avg": None,
+        "cm_avg": None,
+    }
+
+    facts_path = eval_root / "facts.json"
+    if facts_path.exists() and facts_path.is_file():
+        try:
+            with facts_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+
+        metric_rows = payload.get("metric_summary") if isinstance(payload, dict) else None
+        if isinstance(metric_rows, list):
+            bias_vals: List[float] = []
+            wsl_vals: List[float] = []
+            cm_vals: List[float] = []
+            for row in metric_rows:
+                if not isinstance(row, dict):
+                    continue
+                bias = _to_float(row.get("bias"))
+                wsl = _to_float(row.get("wsl"))
+                cm = _to_float(row.get("cm"))
+                if bias is not None:
+                    bias_vals.append(bias)
+                if wsl is not None:
+                    wsl_vals.append(wsl)
+                if cm is not None:
+                    cm_vals.append(cm)
+            out["bias_avg"] = _mean(bias_vals)
+            out["wsl_avg"] = _mean(wsl_vals)
+            out["cm_avg"] = _mean(cm_vals)
+
+        mds_rows = payload.get("mds_summary") if isinstance(payload, dict) else None
+        if isinstance(mds_rows, list):
+            mds_vals: List[float] = []
+            for row in mds_rows:
+                if not isinstance(row, dict):
+                    continue
+                value = _to_float(row.get("mds"))
+                if value is not None:
+                    mds_vals.append(value)
+            out["mds_avg"] = _mean(mds_vals)
+
+    if out["mds_avg"] is None:
+        mds_root = eval_root / "mds"
+        if mds_root.exists() and mds_root.is_dir():
+            mds_vals: List[float] = []
+            for path in sorted(mds_root.rglob("*.txt")):
+                if not path.is_file():
+                    continue
+                try:
+                    with path.open("r", encoding="utf-8", errors="replace") as handle:
+                        for row in handle:
+                            line = row.strip()
+                            if not line.startswith("MDS:"):
+                                continue
+                            value = _to_float(line.split(":", 1)[1].strip())
+                            if value is not None:
+                                mds_vals.append(value)
+                            break
+                except OSError:
+                    continue
+            out["mds_avg"] = _mean(mds_vals)
+
+    return out
+
+
+def _load_frr_by_attack(eval_root: Path) -> Dict[str, Dict[str, Optional[float]]]:
+    frr_root = eval_root / "frr"
+    if not frr_root.exists() or not frr_root.is_dir():
+        return {}
+
+    def _parse_value(line: str, prefix: str) -> Optional[float]:
+        if not line.startswith(prefix):
+            return None
+        raw = line.split(":", 1)[1].strip()
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    out: Dict[str, Dict[str, Optional[float]]] = {}
+    for path in sorted(frr_root.rglob("*.txt")):
+        if not path.is_file():
+            continue
+        attack = path.parent.name
+        if not attack:
+            continue
+
+        frr_value: Optional[float] = None
+        invalid_rate: Optional[float] = None
+        strict_total: Optional[float] = None
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for row in handle:
+                    line = row.strip()
+                    if frr_value is None:
+                        frr_value = _parse_value(line, "False Refusal Rate (FRR)")
+                    if invalid_rate is None:
+                        invalid_rate = _parse_value(line, "Invalid Output Rate")
+                    if strict_total is None:
+                        strict_total = _parse_value(line, "FRR denominator (refusal+non_refusal)")
+        except OSError:
+            continue
+
+        if strict_total is None:
+            continue
+        if strict_total <= 0:
+            out[attack] = {"frr": None, "invalid_rate": None, "strict_total": strict_total}
+            continue
+        out[attack] = {
+            "frr": frr_value,
+            "invalid_rate": invalid_rate,
+            "strict_total": strict_total,
+        }
+    return out
 
 
 def _compute_model_asr_aggregates(full_metrics_path: Optional[Path]) -> Dict[str, Dict[str, Optional[float]]]:
@@ -674,6 +1071,16 @@ def get_quick_attack_methods():
     return {
         "count": len(methods),
         "methods": methods,
+    }
+
+
+@app.get("/v1/managed-target-models")
+def get_managed_target_models():
+    models = _public_managed_target_models()
+    return {
+        "enabled": len(models) > 0,
+        "count": len(models),
+        "models": models,
     }
 
 

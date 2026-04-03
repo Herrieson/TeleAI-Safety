@@ -1,7 +1,7 @@
 "use client";
 
 import type { RunStage } from "@/lib/types";
-import { formatStageName } from "@/lib/i18n";
+import { formatDateTime, formatStageName } from "@/lib/i18n";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { useI18n } from "@/components/common/LocaleProvider";
 
@@ -44,11 +44,11 @@ export function StageTimeline({ stages }: { stages: RunStage[] }) {
           <div className="timeline-meta">
             <p>
               <span className="label mr-2">{text.start}</span>
-              {stage.started_at || "-"}
+              {stage.started_at ? formatDateTime(stage.started_at, locale) : "-"}
             </p>
             <p>
               <span className="label mr-2">{text.end}</span>
-              {stage.ended_at || "-"}
+              {stage.ended_at ? formatDateTime(stage.ended_at, locale) : "-"}
             </p>
             <p>
               <span className="label mr-2">{text.exit}</span>

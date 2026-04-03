@@ -39,6 +39,8 @@ export type Run = {
   quick_openai_base_url: string;
   quick_attack_methods: string[];
   quick_dataset_key: string;
+  managed_target_model_id: string;
+  requester_ip: string;
   created_at: string;
   updated_at: string;
   ended_at: string | null;
@@ -62,6 +64,9 @@ export type RunCreatePayload = {
   quick_openai_api_key: string;
   quick_attack_methods: string[];
   quick_dataset_key: string;
+  managed_target_model_id?: string;
+  managed_access_code?: string;
+  requester_ip?: string;
 };
 
 export type RunLogsResponse = {
@@ -130,6 +135,29 @@ export type QuickAttackDatasetsResponse = {
   datasets: QuickAttackDataset[];
 };
 
+export type ManagedTargetModel = {
+  id: string;
+  label: string;
+  target_model_name: string;
+  description: string;
+};
+
+export type ManagedModePolicy = {
+  max_active_runs_global: number;
+  max_active_runs_per_ip: number;
+  min_interval_seconds: number;
+  access_control_enabled?: boolean;
+  ip_whitelisted?: boolean;
+  invite_code_required?: boolean;
+};
+
+export type ManagedTargetModelsResponse = {
+  enabled: boolean;
+  count: number;
+  models: ManagedTargetModel[];
+  policy?: ManagedModePolicy;
+};
+
 export type AttackConfigOptionsResponse = {
   directory_count: number;
   yaml_file_count: number;
@@ -167,4 +195,3 @@ export type LeaderboardResponse = {
   metrics: LeaderboardMetric[];
   rows: LeaderboardRow[];
 };
-

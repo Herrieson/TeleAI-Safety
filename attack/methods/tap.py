@@ -500,21 +500,50 @@ class TAPManager(BaseAttackManager):
       # 修复攻击主循环中的一些问题
     def fixed_attack_method(self):
       """
-      修复后的攻击方法，确保与变异器接口正确对接
+      修复后的攻击方法，确保每个输入样本都写入一条结果。
+      即便树搜索失败，也会回退到 final_query 并调用目标模型获得 response。
       """
       logger.info("Jailbreak started!")
+      last_final_query = ""
+      total = len(self.data.attack_dataset) if self.data.attack_dataset is not None else 0
+
       for example_idx, example in enumerate(tqdm(self.data.attack_dataset, desc="Attacking...")):
             self.data.example_idx = example_idx
             self.data.find_flag = False
             base_record = dict(example)
+            base_inputs = base_record.get("inputs")
             query = (
                   base_record.get("query")
                   or base_record.get("prompt")
                   or base_record.get("question")
                   or base_record.get("instruction")
             )
+
+            best_example = None
+            best_score = -1
+            best_iteration = 0
+            success_iteration = 0
+            fail_reason = ""
+
             if not query:
+                  final_query = ""
+                  final_response = "[MissingQuery]"
+                  result_rec = dict(base_record)
+                  result_rec.update(
+                        {
+                              "example_idx": example_idx + self.config.data_offset,
+                              "Tree-depth": 0,
+                              "query": query,
+                              "final_query": final_query,
+                              "response": final_response,
+                              "success": False,
+                              "fail_reason": "missing_query",
+                        }
+                  )
+                  self.save(result_rec)
+                  last_final_query = final_query
                   continue
+
             print(f"QUERY:{'='*20}\n{query}")
 
             seed_example = copy.deepcopy(example)
@@ -534,117 +563,140 @@ class TAPManager(BaseAttackManager):
 
                   for i, stream in enumerate(self.data.batch):
                         print(f"BATCH:{i}")
-                  new_dataset = stream
+                        new_dataset = stream
 
-                  # 变异步骤
-                  try:
-                        new_dataset = self.mutator.mutate(new_dataset)  # 现在接口匹配了
-                  except Exception as e:
-                        logger.error(f"变异步骤失败: {e}")
-                        continue
-
-                  if len(new_dataset) == 0:
-                        print("变异后数据集为空，跳过约束步骤。")
-                        continue
-
-                  # 约束步骤
-                  try:
-                        new_dataset = self.selector.constraint(new_dataset)
-                  except Exception as e:
-                        logger.error(f"约束步骤失败: {e}")
-                        continue
-
-                  if len(new_dataset) == 0:
-                        print("约束后数据集为空，跳过迭代。")
-                        continue
-
-                  # 获取目标模型响应
-                  for ex in new_dataset:
                         try:
-                              ex_inputs = ex.get("inputs") if hasattr(ex, "get") else getattr(ex, "inputs", None)
-                              ex.target_responses = [self._query_target(ex.jailbreak_prompt, inputs=ex_inputs)]
+                              new_dataset = self.mutator.mutate(new_dataset)
                         except Exception as e:
-                              logger.warning(f"目标模型聊天失败: {e}")
-                              ex.target_responses = ["[GenerationFailed]"]
-
-                  # 评估步骤
-                  try:
-                        self.evaluator.evaluate(new_dataset)
-                  except Exception as e:
-                        logger.error(f"评估步骤失败: {e}")
-                        # 如果评估失败，给一个默认分数
-                        for ex in new_dataset:
-                              if not hasattr(ex, 'eval_results') or len(ex.eval_results) == 0:
-                                    ex.eval_results = [0]
-
-                  # 选择步骤
-                  try:
-                        new_dataset = self.selector.select(new_dataset)
-                  except Exception as e:
-                        logger.error(f"选择步骤失败: {e}")
-                        continue
-
-                  self.data.batch[i] = new_dataset
-
-                  # 记录日志
-                  for ex in new_dataset:
-                        self.log({
-                              'example_idx': example_idx,
-                              'Tree-depth': iteration,
-                              'jailbreak_prompt': ex.jailbreak_prompt,
-                              'query': ex.query,
-                              'response': ex.target_responses,
-                        })
-
-                  # 检查是否成功
-                  for ex in new_dataset:
-                        try:
-                              is_success = self.evaluator.score(ex.query, ex.target_responses[-1])
-                              if is_success:
-                                    ex.eval_results[-1] = 100
-                                    self.data.find_flag = True
-                                    break
-                        except Exception as e:
-                              logger.error(f"Failed: {e}")
+                              fail_reason = "mutation_exception"
+                              logger.error(f"变异步骤失败: {e}")
                               continue
 
-                  if len(new_dataset) == 0:
-                        continue
+                        if len(new_dataset) == 0:
+                              fail_reason = "mutation_empty"
+                              print("变异后数据集为空，跳过约束步骤。")
+                              continue
 
-                  new_example = max(new_dataset, key=lambda ex: ex.eval_results[-1] if ex.eval_results else 0)
-                  new_example.eval_results = [1]
-                  result_rec = dict(base_record)
-                  result_rec.update(
-                        {
-                              "example_idx": example_idx + self.config.data_offset,
-                              "Tree-depth": iteration,
-                              "query": query,
-                              "final_query": new_example.jailbreak_prompt,
-                              "response": new_example.target_responses[-1] if new_example.target_responses else "",
-                              "success": True,
-                        }
-                  )
-                  self.save(result_rec)
-                  
-            # 处理最终结果
-            if self.data.iteration == self.config.tree_depth:
-                  if not new_dataset:
-                        logger.warning("[Warning] Skip.")
-                        continue
-                  new_example = max(new_dataset, key=lambda ex: ex.eval_results[-1] if ex.eval_results else 0)
-                  new_example.eval_results = [0]
+                        try:
+                              new_dataset = self.selector.constraint(new_dataset)
+                        except Exception as e:
+                              fail_reason = "constraint_exception"
+                              logger.error(f"约束步骤失败: {e}")
+                              continue
 
+                        if len(new_dataset) == 0:
+                              fail_reason = "constraint_empty"
+                              print("约束后数据集为空，跳过迭代。")
+                              continue
+
+                        for ex in new_dataset:
+                              try:
+                                    ex_inputs = ex.get("inputs") if hasattr(ex, "get") else getattr(ex, "inputs", None)
+                                    ex.target_responses = [self._query_target(ex.jailbreak_prompt, inputs=ex_inputs)]
+                              except Exception as e:
+                                    logger.warning(f"目标模型聊天失败: {e}")
+                                    ex.target_responses = ["[GenerationFailed]"]
+
+                        try:
+                              self.evaluator.evaluate(new_dataset)
+                        except Exception as e:
+                              fail_reason = "evaluate_exception"
+                              logger.error(f"评估步骤失败: {e}")
+                              for ex in new_dataset:
+                                    if not hasattr(ex, 'eval_results') or len(ex.eval_results) == 0:
+                                          ex.eval_results = [0]
+
+                        try:
+                              new_dataset = self.selector.select(new_dataset)
+                        except Exception as e:
+                              fail_reason = "selection_exception"
+                              logger.error(f"选择步骤失败: {e}")
+                              continue
+
+                        if len(new_dataset) == 0:
+                              fail_reason = "selection_empty"
+                              continue
+
+                        self.data.batch[i] = new_dataset
+
+                        for ex in new_dataset:
+                              self.log(
+                                    {
+                                          'example_idx': example_idx,
+                                          'Tree-depth': iteration,
+                                          'jailbreak_prompt': ex.jailbreak_prompt,
+                                          'query': ex.query,
+                                          'response': ex.target_responses,
+                                    }
+                              )
+
+                        curr_best = max(new_dataset, key=lambda ex: ex.eval_results[-1] if ex.eval_results else 0)
+                        curr_score = curr_best.eval_results[-1] if curr_best.eval_results else 0
+                        if curr_score > best_score:
+                              best_score = curr_score
+                              best_example = copy.deepcopy(curr_best)
+                              best_iteration = iteration
+
+                        for ex in new_dataset:
+                              try:
+                                    is_success = self.evaluator.score(ex.query, ex.target_responses[-1])
+                                    if is_success:
+                                          ex.eval_results[-1] = 100
+                                          self.data.find_flag = True
+                                          best_example = copy.deepcopy(ex)
+                                          best_score = 100
+                                          success_iteration = iteration
+                                          break
+                              except Exception as e:
+                                    logger.error(f"Failed: {e}")
+                                    continue
+
+                        if self.data.find_flag:
+                              break
+
+                  if self.data.find_flag:
+                        break
+
+            if best_example is not None and hasattr(best_example, "jailbreak_prompt"):
+                  final_query = best_example.jailbreak_prompt
+            else:
+                  final_query = query
+                  if not fail_reason:
+                        fail_reason = "no_valid_candidates"
+
+            try:
+                  final_response = self._query_target(final_query, inputs=base_inputs)
+            except Exception as e:
+                  logger.warning(f"最终响应生成失败: {e}")
+                  final_response = "[GenerationFailed]"
+
+            result_rec = dict(base_record)
+            result_rec.update(
+                  {
+                        "example_idx": example_idx + self.config.data_offset,
+                        "Tree-depth": success_iteration if self.data.find_flag else best_iteration,
+                        "query": query,
+                        "final_query": final_query,
+                        "response": final_response,
+                        "success": bool(self.data.find_flag),
+                        "fail_reason": "" if self.data.find_flag else fail_reason,
+                  }
+            )
+            self.save(result_rec)
+
+            if self.data.find_flag:
+                  self.current_jailbreak += 1
+            last_final_query = final_query
+
+      asr = 100 * self.current_jailbreak / total if total else 0
+      print(f"ASR: {asr}%")
       logger.info("Jailbreak finished!")
       logger.info('Jailbreak result saved at {}'.format(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), self.config.res_save_path)
       ))
 
-      if self.data.find_flag and 'new_example' in locals() and hasattr(new_example, 'jailbreak_prompt'):
-            return new_example.jailbreak_prompt
-
-      if 'new_dataset' in locals() and new_dataset:
-            new_example = max(new_dataset, key=lambda ex: ex.eval_results[-1] if ex.eval_results else 0)
-            return new_example.jailbreak_prompt
+      if last_final_query:
+            return last_final_query
 
       logger.warning("No valid TAP candidates generated; returning empty prompt.")
       return ""

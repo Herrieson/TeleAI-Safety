@@ -17,6 +17,9 @@ class RunCreateRequest(BaseModel):
     quick_openai_api_key: str = ""
     quick_attack_methods: list[str] = Field(default_factory=lambda: ["pair", "cipher", "rene"])
     quick_dataset_key: str = "teleai_samples_500_500"
+    managed_target_model_id: str = ""
+    managed_access_code: str = ""
+    requester_ip: str = ""
 
     @model_validator(mode="after")
     def _validate_eval_only_inputs(self):
