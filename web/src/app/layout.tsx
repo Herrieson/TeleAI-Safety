@@ -4,8 +4,8 @@ import { LocaleProvider } from "@/components/common/LocaleProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TeleRT 运行控制台 | Runs Console",
-  description: "TeleRT 红队流水线控制台 / TeleRT red team pipeline web console"
+  title: "灵弈TeleRT大模型红队安全测评靶场 | Runs Console",
+  description: "TeleRT 红队安全测评靶场 / TeleRT red team pipeline web console"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

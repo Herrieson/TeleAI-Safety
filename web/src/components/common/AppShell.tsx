@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const text =
     locale === "zh"
       ? {
-          title: "灵弈 TeleRT 大模型测试平台",
+          title: "灵弈TeleRT大模型红队安全测评靶场",
           subtitle: "红队流水线控制平面",
           liveTelemetry: "实时遥测",
           aiSafetyOps: "AI 安全运营",
