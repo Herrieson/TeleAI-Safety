@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telert-web
+  namespace: teleai
+  labels:
+    app.kubernetes.io/name: teleai-safety
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: teleai-safety
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: teleai-safety
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: web
+          image: registry.example.com/team/teleai-web:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: teleai-safety-config
+                  key: HOST
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: teleai-safety-config
+                  key: PORT
+            - name: NEXT_PUBLIC_BFF_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: teleai-safety-config
+                  key: NEXT_PUBLIC_BFF_BASE_URL
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /runs
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telert-bff
+  namespace: teleai
+  labels:
+    app.kubernetes.io/name: teleai-safety
+    app.kubernetes.io/component: bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: teleai-safety
+      app.kubernetes.io/component: bff
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: teleai-safety
+        app.kubernetes.io/component: bff
+    spec:
+      containers:
+        - name: bff
+          image: registry.example.com/team/teleai-python-services:latest
+          imagePullPolicy: IfNotPresent
+          command: ["uv", "run", "python", "-m", "uvicorn", "services.bff.app.main:app", "--host", "0.0.0.0", "--port", "9000"]
+          envFrom:
+            - configMapRef:
+                name: teleai-safety-config
+            - secretRef:
+                name: teleai-safety-config-secret
+          ports:
+            - name: http
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telert-orchestrator
+  namespace: teleai
+  labels:
+    app.kubernetes.io/name: teleai-safety
+    app.kubernetes.io/component: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: teleai-safety
+      app.kubernetes.io/component: orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: teleai-safety
+        app.kubernetes.io/component: orchestrator
+    spec:
+      containers:
+        - name: orchestrator
+          image: registry.example.com/team/teleai-python-services:latest
+          imagePullPolicy: IfNotPresent
+          command: ["uv", "run", "python", "-m", "uvicorn", "services.orchestrator.app.main:app", "--host", "0.0.0.0", "--port", "9001"]
+          envFrom:
+            - configMapRef:
+                name: teleai-safety-config
+            - secretRef:
+                name: teleai-safety-config-secret
+          ports:
+            - name: http
+              containerPort: 9001
+          volumeMounts:
+            - name: teleai-data
+              mountPath: /app/data
+            - name: teleai-benchmark
+              mountPath: /app/benchmark/result
+            - name: teleai-evaluate
+              mountPath: /app/evaluate/evaluation_report
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: teleai-data
+          persistentVolumeClaim:
+            claimName: teleai-safety-data-pvc
+        - name: teleai-benchmark
+          persistentVolumeClaim:
+            claimName: teleai-safety-benchmark-pvc
+        - name: teleai-evaluate
+          persistentVolumeClaim:
+            claimName: teleai-safety-evaluate-pvc

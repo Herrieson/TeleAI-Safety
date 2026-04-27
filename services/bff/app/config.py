@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 def _as_bool(value: str, default: bool = False) -> bool:
@@ -9,10 +10,15 @@ def _as_bool(value: str, default: bool = False) -> bool:
 
 
 class Settings:
+    repo_root: Path = Path(__file__).resolve().parents[3]
     app_name: str = "teleai-bff"
     app_version: str = "0.1.0"
     orchestrator_base_url: str = os.getenv("ORCHESTRATOR_BASE_URL", "http://127.0.0.1:9001")
     timeout_seconds: int = int(os.getenv("BFF_HTTP_TIMEOUT", "20"))
+    auth_users_file: Path = Path(os.getenv("BFF_AUTH_USERS_FILE", str(repo_root / "data" / "service_auth" / "users.json")))
+    session_secret: str = os.getenv("BFF_SESSION_SECRET", "teleai-dev-session-secret")
+    session_ttl_seconds: int = int(os.getenv("BFF_SESSION_TTL_SECONDS", "43200"))
+    password_hash_iterations: int = int(os.getenv("BFF_PASSWORD_HASH_ITERATIONS", "200000"))
     managed_mode_max_active_runs_global: int = int(os.getenv("BFF_MANAGED_MODE_MAX_ACTIVE_RUNS_GLOBAL", "6"))
     managed_mode_max_active_runs_per_ip: int = int(os.getenv("BFF_MANAGED_MODE_MAX_ACTIVE_RUNS_PER_IP", "2"))
     managed_mode_min_interval_seconds: int = int(os.getenv("BFF_MANAGED_MODE_MIN_INTERVAL_SECONDS", "300"))

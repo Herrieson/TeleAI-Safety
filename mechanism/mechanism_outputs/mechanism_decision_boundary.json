@@ -1,0 +1,174 @@
+{
+  "mechanism_id": "A1_A4_A5_A8",
+  "module": "mechanism_modules.mech_decision_boundary",
+  "mechanism_name": "判别与决策层",
+  "output_metrics": [
+    "H-ASR"
+  ],
+  "metric_directions": {
+    "H-ASR": "lower_better"
+  },
+  "metric_weights": {
+    "H-ASR": 1.0
+  },
+  "model_metric_values": [
+    {
+      "model_id": "gpt-5.4",
+      "metrics": {
+        "H-ASR": 0.4341421143847487
+      }
+    },
+    {
+      "model_id": "gpt-5.2",
+      "metrics": {
+        "H-ASR": 0.43883984867591425
+      }
+    },
+    {
+      "model_id": "gpt-4o",
+      "metrics": {
+        "H-ASR": 0.444
+      }
+    },
+    {
+      "model_id": "gemini-3.1-pro",
+      "metrics": {
+        "H-ASR": 0.46153846153846156
+      }
+    },
+    {
+      "model_id": "gpt-5",
+      "metrics": {
+        "H-ASR": 0.44510978043912175
+      }
+    },
+    {
+      "model_id": "glm-5",
+      "metrics": {
+        "H-ASR": 0.5135135135135135
+      }
+    },
+    {
+      "model_id": "grok-4.1",
+      "metrics": {
+        "H-ASR": 0.4392
+      }
+    },
+    {
+      "model_id": "kimi-2.5",
+      "metrics": {
+        "H-ASR": 0.5208333333333334
+      }
+    },
+    {
+      "model_id": "minmax-m2.5",
+      "metrics": {
+        "H-ASR": 0.4420654911838791
+      }
+    },
+    {
+      "model_id": "qwen3.5-397b",
+      "metrics": {
+        "H-ASR": 0.45641646489104115
+      }
+    }
+  ],
+  "metric_rankings": [
+    {
+      "metric": "H-ASR",
+      "direction": "lower_better",
+      "sorted_results": [
+        {
+          "model_id": "gpt-5.4",
+          "value": 0.4341421143847487
+        },
+        {
+          "model_id": "gpt-5.2",
+          "value": 0.43883984867591425
+        },
+        {
+          "model_id": "grok-4.1",
+          "value": 0.4392
+        },
+        {
+          "model_id": "minmax-m2.5",
+          "value": 0.4420654911838791
+        },
+        {
+          "model_id": "gpt-4o",
+          "value": 0.444
+        },
+        {
+          "model_id": "gpt-5",
+          "value": 0.44510978043912175
+        },
+        {
+          "model_id": "qwen3.5-397b",
+          "value": 0.45641646489104115
+        },
+        {
+          "model_id": "gemini-3.1-pro",
+          "value": 0.46153846153846156
+        },
+        {
+          "model_id": "glm-5",
+          "value": 0.5135135135135135
+        },
+        {
+          "model_id": "kimi-2.5",
+          "value": 0.5208333333333334
+        }
+      ]
+    }
+  ],
+  "composite_ranking": {
+    "metric": "Composite Score",
+    "direction": "lower_better",
+    "weights": {
+      "H-ASR": 1.0
+    },
+    "normalization": "raw_weighted_average",
+    "sorted_results": [
+      {
+        "model_id": "gpt-5.4",
+        "value": 0.4341421143847487
+      },
+      {
+        "model_id": "gpt-5.2",
+        "value": 0.43883984867591425
+      },
+      {
+        "model_id": "grok-4.1",
+        "value": 0.4392
+      },
+      {
+        "model_id": "minmax-m2.5",
+        "value": 0.4420654911838791
+      },
+      {
+        "model_id": "gpt-4o",
+        "value": 0.444
+      },
+      {
+        "model_id": "gpt-5",
+        "value": 0.44510978043912175
+      },
+      {
+        "model_id": "qwen3.5-397b",
+        "value": 0.45641646489104115
+      },
+      {
+        "model_id": "gemini-3.1-pro",
+        "value": 0.46153846153846156
+      },
+      {
+        "model_id": "glm-5",
+        "value": 0.5135135135135135
+      },
+      {
+        "model_id": "kimi-2.5",
+        "value": 0.5208333333333334
+      }
+    ]
+  }
+}

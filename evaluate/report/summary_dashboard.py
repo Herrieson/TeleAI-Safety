@@ -107,6 +107,18 @@ def parse_attack_run(attack_run: str) -> Optional[Tuple[str, str]]:
 
 
 def derive_attack_run(input_file: str) -> Tuple[str, str]:
+    def find_relpath_after_marker(marker_parts: List[str]) -> Optional[str]:
+        normalized_parts = os.path.normpath(abs_input).split(os.sep)
+        max_idx = len(normalized_parts) - len(marker_parts)
+        for idx in range(max_idx + 1):
+            if normalized_parts[idx : idx + len(marker_parts)] != marker_parts:
+                continue
+            suffix = normalized_parts[idx + len(marker_parts) :]
+            if not suffix:
+                return ""
+            return os.path.join(*suffix)
+        return None
+
     abs_input = os.path.abspath(input_file)
     candidate_roots = [
         os.path.abspath(RESULTS_DIR),
@@ -118,6 +130,20 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
         if abs_input.startswith(root + os.sep):
             rel = os.path.relpath(abs_input, root)
             break
+    if rel is None:
+        rel = find_relpath_after_marker(["data", "attack_results"])
+    if rel is None:
+        for marker in (["evaluation_report", "asr_labels"], ["evaluation_report", "frr_labels"]):
+            rel_labels = find_relpath_after_marker(marker)
+            if rel_labels is None:
+                continue
+            label_parts = rel_labels.split(os.sep)
+            if len(label_parts) >= 2:
+                return os.path.join(label_parts[0], label_parts[1]), label_parts[0]
+            rel = rel_labels
+            break
+    if rel is None:
+        rel = find_relpath_after_marker(["results"])
     if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):

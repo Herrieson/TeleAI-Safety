@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from .config import settings
 from .dataset_catalog import list_quick_datasets
 from .executor import cancel_run_execution, delete_run_artifacts, list_quick_supported_methods, start_run_execution
+from .mechanism import load_mechanism_dashboard_html, load_mechanism_leaderboard, load_mechanism_overview
 from .models import RunCreate, RunRecord, new_run_record
 from .secret_store import secret_store
 from .store import run_store
@@ -295,6 +297,24 @@ def get_leaderboard():
         "metrics": _public_leaderboard_metrics(),
         "rows": rows,
     }
+
+
+@app.get("/v1/mechanism/overview")
+def get_mechanism_overview():
+    return load_mechanism_overview()
+
+
+@app.get("/v1/mechanism/leaderboard")
+def get_mechanism_leaderboard():
+    return load_mechanism_leaderboard()
+
+
+@app.get("/v1/mechanism/dashboard")
+def get_mechanism_dashboard():
+    html = load_mechanism_dashboard_html()
+    if not html:
+        raise HTTPException(status_code=404, detail="mechanism dashboard not found")
+    return HTMLResponse(content=html)
 
 
 

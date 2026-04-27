@@ -5,14 +5,48 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$ROOT_DIR/.dev-runtime"
 LOG_DIR="$RUNTIME_DIR/logs"
 PID_FILE="$RUNTIME_DIR/pids.env"
+LOCAL_ENV_FILE="$ROOT_DIR/.env.local"
+ROOT_ENV_FILE="$ROOT_DIR/.env"
 
-ORCH_URL="${ORCHESTRATOR_BASE_URL:-http://127.0.0.1:9001}"
-BFF_URL="${BFF_BASE_URL:-http://127.0.0.1:9000}"
-WEB_URL="${WEB_BASE_URL:-http://127.0.0.1:3000}"
-BFF_CORS_ORIGINS="${BFF_CORS_ALLOW_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000}"
+ORCH_BIND_HOST="${ORCH_BIND_HOST:-0.0.0.0}"
+ORCH_PORT="${ORCH_PORT:-9001}"
+BFF_BIND_HOST="${BFF_BIND_HOST:-0.0.0.0}"
+BFF_PORT="${BFF_PORT:-9000}"
+WEB_BIND_HOST="${WEB_BIND_HOST:-0.0.0.0}"
+WEB_PORT="${WEB_PORT:-3000}"
+
+default_local_url() {
+  local port="$1"
+  echo "http://127.0.0.1:$port"
+}
+
+ORCH_LOCAL_URL="${ORCH_LOCAL_URL:-$(default_local_url "$ORCH_PORT")}"
+BFF_LOCAL_URL="${BFF_LOCAL_URL:-$(default_local_url "$BFF_PORT")}"
+WEB_LOCAL_URL="${WEB_LOCAL_URL:-$(default_local_url "$WEB_PORT")}"
+ORCH_URL="${ORCHESTRATOR_BASE_URL:-$ORCH_LOCAL_URL}"
+
+WEB_SERVER_BFF_BASE_URL="${BFF_BASE_URL:-$BFF_LOCAL_URL}"
+
+if [[ "${NEXT_PUBLIC_BFF_BASE_URL+x}" == x ]]; then
+  WEB_PUBLIC_BFF_BASE_URL="$NEXT_PUBLIC_BFF_BASE_URL"
+else
+  WEB_PUBLIC_BFF_BASE_URL=""
+fi
+
+BFF_CORS_ORIGINS="${BFF_CORS_ALLOW_ORIGINS:-http://127.0.0.1:${WEB_PORT},http://localhost:${WEB_PORT}}"
 ORCH_PID=""
 BFF_PID=""
 WEB_PID=""
+
+load_env_file() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  fi
+}
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -118,6 +152,18 @@ trap 'cleanup_on_error $?' EXIT
 require_cmd uv
 require_cmd node
 require_cmd curl
+require_cmd setsid
+
+load_env_file "$ROOT_ENV_FILE"
+load_env_file "$LOCAL_ENV_FILE"
+
+start_detached() {
+  local log_file="$1"
+  shift
+
+  setsid "$@" </dev/null >"$log_file" 2>&1 &
+  echo $!
+}
 
 mkdir -p "$LOG_DIR"
 
@@ -130,31 +176,30 @@ if [[ -f "$PID_FILE" ]]; then
   fi
 fi
 
-ensure_port_free "$(extract_port_from_url "$ORCH_URL")" "orchestrator"
-ensure_port_free "$(extract_port_from_url "$BFF_URL")" "bff"
-ensure_port_free "$(extract_port_from_url "$WEB_URL")" "web"
+ensure_port_free "$ORCH_PORT" "orchestrator"
+ensure_port_free "$BFF_PORT" "bff"
+ensure_port_free "$WEB_PORT" "web"
 
 cd "$ROOT_DIR"
-nohup uv run python -m uvicorn services.orchestrator.app.main:app --host 127.0.0.1 --port 9001 --reload \
-  >"$LOG_DIR/orchestrator.log" 2>&1 &
-ORCH_PID=$!
+ORCH_PID=$(start_detached "$LOG_DIR/orchestrator.log" \
+  uv run python -m uvicorn services.orchestrator.app.main:app --host "$ORCH_BIND_HOST" --port "$ORCH_PORT")
 echo "[dev_up] started orchestrator pid=$ORCH_PID"
-wait_http_ok "$ORCH_URL/health" "orchestrator"
+wait_http_ok "$ORCH_LOCAL_URL/health" "orchestrator"
 
 cd "$ROOT_DIR"
-nohup env ORCHESTRATOR_BASE_URL="$ORCH_URL" BFF_CORS_ALLOW_ORIGINS="$BFF_CORS_ORIGINS" \
-  uv run python -m uvicorn services.bff.app.main:app --host 127.0.0.1 --port 9000 --reload \
-  >"$LOG_DIR/bff.log" 2>&1 &
-BFF_PID=$!
+BFF_PID=$(start_detached "$LOG_DIR/bff.log" \
+  env ORCHESTRATOR_BASE_URL="$ORCH_URL" BFF_CORS_ALLOW_ORIGINS="$BFF_CORS_ORIGINS" \
+  uv run python -m uvicorn services.bff.app.main:app --host "$BFF_BIND_HOST" --port "$BFF_PORT")
 echo "[dev_up] started bff pid=$BFF_PID"
-wait_http_ok "$BFF_URL/api/health" "bff"
+wait_http_ok "$BFF_LOCAL_URL/api/health" "bff"
 
 cd "$ROOT_DIR/web"
 # Use Next.js CLI directly so the recorded PID maps to the long-lived dev process.
-nohup node ./node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3000 >"$LOG_DIR/web.log" 2>&1 &
-WEB_PID=$!
+WEB_PID=$(start_detached "$LOG_DIR/web.log" \
+  env BFF_BASE_URL="$WEB_SERVER_BFF_BASE_URL" NEXT_PUBLIC_BFF_BASE_URL="$WEB_PUBLIC_BFF_BASE_URL" \
+  node ./node_modules/next/dist/bin/next dev --hostname "$WEB_BIND_HOST" --port "$WEB_PORT")
 echo "[dev_up] started web pid=$WEB_PID"
-wait_http_ok "$WEB_URL/runs" "web"
+wait_http_ok "$WEB_LOCAL_URL/runs" "web"
 
 cat >"$PID_FILE" <<PIDS
 ORCH_PID=$ORCH_PID
@@ -165,7 +210,13 @@ PIDS
 trap - EXIT
 
 echo "[dev_up] all services started"
-echo "[dev_up] web:  $WEB_URL/runs"
-echo "[dev_up] bff:  $BFF_URL/api/health"
-echo "[dev_up] orch: $ORCH_URL/health"
+echo "[dev_up] web:  $WEB_LOCAL_URL/runs"
+echo "[dev_up] bff:  $BFF_LOCAL_URL/api/health"
+echo "[dev_up] orch: $ORCH_LOCAL_URL/health"
+if [[ -n "$WEB_PUBLIC_BFF_BASE_URL" ]]; then
+  echo "[dev_up] web api base: $WEB_PUBLIC_BFF_BASE_URL"
+else
+  echo "[dev_up] web api base: same-origin (/api via reverse proxy)"
+fi
+echo "[dev_up] web server bff base: $WEB_SERVER_BFF_BASE_URL"
 echo "[dev_up] logs: $LOG_DIR"

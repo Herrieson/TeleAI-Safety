@@ -1,0 +1,174 @@
+{
+  "mechanism_id": "C1",
+  "module": "mechanism_modules.mech_system_architecture_risk",
+  "mechanism_name": "系统结构与架构脆弱性",
+  "output_metrics": [
+    "Code Safety Reliability"
+  ],
+  "metric_directions": {
+    "Code Safety Reliability": "higher_better"
+  },
+  "metric_weights": {
+    "Code Safety Reliability": 1.0
+  },
+  "model_metric_values": [
+    {
+      "model_id": "gpt-5.4",
+      "metrics": {
+        "Code Safety Reliability": 0.14037698412698413
+      }
+    },
+    {
+      "model_id": "gpt-5.2",
+      "metrics": {
+        "Code Safety Reliability": 0.1433531746031746
+      }
+    },
+    {
+      "model_id": "gpt-4o",
+      "metrics": {
+        "Code Safety Reliability": 0.08680555555555555
+      }
+    },
+    {
+      "model_id": "gemini-3.1-pro",
+      "metrics": {
+        "Code Safety Reliability": 0.11904761904761904
+      }
+    },
+    {
+      "model_id": "gpt-5",
+      "metrics": {
+        "Code Safety Reliability": 0.011904761904761904
+      }
+    },
+    {
+      "model_id": "glm-5",
+      "metrics": {
+        "Code Safety Reliability": 0.014384920634920634
+      }
+    },
+    {
+      "model_id": "grok-4.1",
+      "metrics": {
+        "Code Safety Reliability": 0.05952380952380952
+      }
+    },
+    {
+      "model_id": "kimi-2.5",
+      "metrics": {
+        "Code Safety Reliability": 0.0
+      }
+    },
+    {
+      "model_id": "minmax-m2.5",
+      "metrics": {
+        "Code Safety Reliability": 0.08382936507936507
+      }
+    },
+    {
+      "model_id": "qwen3.5-397b",
+      "metrics": {
+        "Code Safety Reliability": 0.0625
+      }
+    }
+  ],
+  "metric_rankings": [
+    {
+      "metric": "Code Safety Reliability",
+      "direction": "higher_better",
+      "sorted_results": [
+        {
+          "model_id": "gpt-5.2",
+          "value": 0.1433531746031746
+        },
+        {
+          "model_id": "gpt-5.4",
+          "value": 0.14037698412698413
+        },
+        {
+          "model_id": "gemini-3.1-pro",
+          "value": 0.11904761904761904
+        },
+        {
+          "model_id": "gpt-4o",
+          "value": 0.08680555555555555
+        },
+        {
+          "model_id": "minmax-m2.5",
+          "value": 0.08382936507936507
+        },
+        {
+          "model_id": "qwen3.5-397b",
+          "value": 0.0625
+        },
+        {
+          "model_id": "grok-4.1",
+          "value": 0.05952380952380952
+        },
+        {
+          "model_id": "glm-5",
+          "value": 0.014384920634920634
+        },
+        {
+          "model_id": "gpt-5",
+          "value": 0.011904761904761904
+        },
+        {
+          "model_id": "kimi-2.5",
+          "value": 0.0
+        }
+      ]
+    }
+  ],
+  "composite_ranking": {
+    "metric": "Composite Score",
+    "direction": "higher_better",
+    "weights": {
+      "Code Safety Reliability": 1.0
+    },
+    "normalization": "min_max_by_metric_then_weighted_sum",
+    "sorted_results": [
+      {
+        "model_id": "gpt-5.2",
+        "value": 1.0
+      },
+      {
+        "model_id": "gpt-5.4",
+        "value": 0.9792387543252596
+      },
+      {
+        "model_id": "gemini-3.1-pro",
+        "value": 0.8304498269896193
+      },
+      {
+        "model_id": "gpt-4o",
+        "value": 0.6055363321799309
+      },
+      {
+        "model_id": "minmax-m2.5",
+        "value": 0.5847750865051903
+      },
+      {
+        "model_id": "qwen3.5-397b",
+        "value": 0.4359861591695502
+      },
+      {
+        "model_id": "grok-4.1",
+        "value": 0.41522491349480967
+      },
+      {
+        "model_id": "glm-5",
+        "value": 0.10034602076124567
+      },
+      {
+        "model_id": "gpt-5",
+        "value": 0.08304498269896193
+      },
+      {
+        "model_id": "kimi-2.5",
+        "value": 0.0
+      }
+    ]
+  }
+}

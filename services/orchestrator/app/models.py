@@ -27,6 +27,7 @@ class RunCreate(BaseModel):
     quick_attack_methods: List[str] = Field(default_factory=lambda: ["pair", "cipher", "rene"])
     quick_dataset_key: str = "teleai_samples_500_500"
     managed_target_model_id: str = ""
+    owner_username: str = ""
     requester_ip: str = ""
 
     @model_validator(mode="after")
@@ -73,6 +74,7 @@ class RunRecord(BaseModel):
     quick_attack_methods: List[str] = Field(default_factory=list)
     quick_dataset_key: str = "teleai_samples_500_500"
     managed_target_model_id: str = ""
+    owner_username: str = ""
     requester_ip: str = ""
     created_at: datetime
     updated_at: datetime
@@ -121,6 +123,7 @@ def new_run_record(payload: RunCreate) -> RunRecord:
         quick_attack_methods=payload.quick_attack_methods,
         quick_dataset_key=payload.quick_dataset_key,
         managed_target_model_id=payload.managed_target_model_id,
+        owner_username=payload.owner_username,
         requester_ip=payload.requester_ip,
         created_at=now,
         updated_at=now,

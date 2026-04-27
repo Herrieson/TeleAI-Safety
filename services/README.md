@@ -86,24 +86,39 @@ TELEAI_MANAGED_TARGET_MODELS='[
 
 ## 启动方式
 
-在仓库根目录执行：
+开发模式可直接运行：
 
 ```bash
-uv run python -m uvicorn services.orchestrator.app.main:app --host 0.0.0.0 --port 9001 --reload
+bash scripts/dev_up.sh
 ```
 
-新开一个终端：
+默认行为：
+
+1. Orchestrator：`127.0.0.1:9001`
+2. BFF：`127.0.0.1:9000`
+3. Web：`127.0.0.1:3000`
+4. Web 启动时会自动注入 `NEXT_PUBLIC_BFF_BASE_URL=http://127.0.0.1:9000`
+
+如需为外部访问做部署准备，推荐保持 Orchestrator 内部，仅通过反向代理暴露 Web + `/api/`：
 
 ```bash
-ORCHESTRATOR_BASE_URL=http://127.0.0.1:9001 \
-uv run python -m uvicorn services.bff.app.main:app --host 0.0.0.0 --port 9000 --reload
+ORCH_BIND_HOST=127.0.0.1 \
+BFF_BIND_HOST=127.0.0.1 \
+WEB_BIND_HOST=127.0.0.1 \
+BFF_CORS_ALLOW_ORIGINS=https://teleai.example.com \
+NEXT_PUBLIC_BFF_BASE_URL= \
+bash scripts/dev_up.sh
 ```
 
-可选：当前端与 BFF 分端口部署时，建议显式配置 CORS 来源（默认已包含 `127.0.0.1:3000` 与 `localhost:3000`）：
+说明：
 
-```bash
-BFF_CORS_ALLOW_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
-```
+1. `NEXT_PUBLIC_BFF_BASE_URL=` 置空时，前端改用同域 `/api/*`
+2. 反向代理将 `/` 转发到 `127.0.0.1:3000`
+3. 反向代理将 `/api/` 转发到 `127.0.0.1:9000`
+4. Orchestrator 继续只由 BFF 通过 `http://127.0.0.1:9001` 访问
+
+Nginx 示例见：`deploy/nginx/teleai-external.conf`
+完整说明见：`docs/external_access.md`
 
 ## 接口
 

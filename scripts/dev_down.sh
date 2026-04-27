@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="$ROOT_DIR/.dev-runtime"
 PID_FILE="$RUNTIME_DIR/pids.env"
+ORCH_PORT="${ORCH_PORT:-9001}"
+BFF_PORT="${BFF_PORT:-9000}"
+WEB_PORT="${WEB_PORT:-3000}"
 
 stop_pid() {
   local pid="$1"
@@ -55,10 +58,11 @@ stop_matching_pids() {
 }
 
 stop_stale_known_processes() {
-  stop_matching_pids "uv run python -m uvicorn services.orchestrator.app.main:app --host 127.0.0.1 --port 9001 --reload" "orchestrator(stale)"
-  stop_matching_pids "uv run python -m uvicorn services.bff.app.main:app --host 127.0.0.1 --port 9000 --reload" "bff(stale)"
-  stop_matching_pids "$ROOT_DIR/web/node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 3000" "web(stale)"
-  stop_matching_pids "$ROOT_DIR/web/node_modules/.bin/next dev --hostname 127.0.0.1 --port 3000" "web(stale-legacy)"
+  stop_matching_pids "services.orchestrator.app.main:app .* --port ${ORCH_PORT}( |$)" "orchestrator(stale)"
+  stop_matching_pids "services.bff.app.main:app .* --port ${BFF_PORT}( |$)" "bff(stale)"
+  stop_matching_pids "$ROOT_DIR/web/node_modules/next/dist/bin/next dev --hostname .* --port ${WEB_PORT}( |$)" "web(stale)"
+  stop_matching_pids "$ROOT_DIR/web/node_modules/.bin/next dev --hostname .* --port ${WEB_PORT}( |$)" "web(stale-legacy)"
+  stop_matching_pids "next-server \\(v[0-9.]+\\)" "web(next-server)"
 }
 
 if [[ -f "$PID_FILE" ]]; then

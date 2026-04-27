@@ -1,0 +1,96 @@
+{
+  "data_paths": {
+    "attack_root": "attack",
+    "api_attack_root": "mechanism_outputs/jailbreak_api",
+    "judge_root": "huanjue",
+    "code_root": "code"
+  },
+  "output": {
+    "root": "mechanism_outputs"
+  },
+  "model_ids": [
+    "gpt-5.4",
+    "gpt-5.2",
+    "gpt-4o",
+    "gemini-3.1-pro",
+    "gpt-5",
+    "glm-5",
+    "grok-4.1",
+    "kimi-2.5",
+    "minmax-m2.5",
+    "qwen3.5-397b"
+  ],
+  "mechanisms": [
+    {
+      "id": "A1_A4_A5_A8",
+      "module": "mechanism_modules.mech_decision_boundary",
+      "output_file": "mechanism_decision_boundary.json",
+      "composite_mode": "raw_weighted_sum",
+      "metric_weights": {
+        "H-ASR": 1.0
+      },
+      "output_metrics": [
+        "H-ASR"
+      ]
+    },
+    {
+      "id": "A1_A6_CONTEXT",
+      "module": "mechanism_modules.mech_context_threshold_dynamics",
+      "output_file": "mechanism_context_threshold_dynamics.json",
+      "metric_weights": {
+        "Monotonic Ratio": 1.0
+      },
+      "output_metrics": [
+        "Monotonic Ratio"
+      ]
+    },
+    {
+      "id": "A7",
+      "module": "mechanism_modules.mech_multiturn_breakthrough",
+      "output_file": "mechanism_multiturn_breakthrough.json",
+      "metric_weights": {
+        "ASR": 1.0
+      },
+      "output_metrics": [
+        "ASR"
+      ]
+    },
+    {
+      "id": "A6",
+      "module": "mechanism_modules.mech_pseudo_compliance_gap",
+      "output_file": "mechanism_pseudo_compliance_gap.json",
+      "metric_weights": {
+        "关键词拒答率": 0.0,
+        "API非越狱率": 0.0,
+        "伪合规风险代理指标": 1.0
+      },
+      "output_metrics": [
+        "关键词拒答率",
+        "API非越狱率",
+        "伪合规风险代理指标"
+      ]
+    },
+    {
+      "id": "H1_H2_H3",
+      "module": "mechanism_modules.mech_ood_legal_generalization",
+      "output_file": "mechanism_ood_legal_generalization.json",
+      "metric_weights": {
+        "法律综合可靠性": 1.0
+      },
+      "output_metrics": [
+        "法律综合可靠性"
+      ]
+    },
+    {
+      "id": "C1",
+      "module": "mechanism_modules.mech_system_architecture_risk",
+      "output_file": "mechanism_system_architecture_risk.json",
+      "metric_weights": {
+        "Code Safety Reliability": 1.0
+      },
+      "output_metrics": [
+        "Code Safety Reliability"
+      ]
+    }
+  ]
+}

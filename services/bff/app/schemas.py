@@ -3,6 +3,22 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class AuthUserResponse(BaseModel):
+    username: str
+    role: Literal["admin", "user"]
+
+
+class LoginResponse(BaseModel):
+    token: str
+    session_ttl_seconds: int
+    user: AuthUserResponse
+
+
 class RunCreateRequest(BaseModel):
     name: str = Field(default="", max_length=128)
     mode: Literal["attack_only", "benchmark_only", "eval_only", "full_pipeline"] = "full_pipeline"

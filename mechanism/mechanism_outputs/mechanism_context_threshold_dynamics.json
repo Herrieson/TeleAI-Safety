@@ -1,0 +1,174 @@
+{
+  "mechanism_id": "A1_A6_CONTEXT",
+  "module": "mechanism_modules.mech_context_threshold_dynamics",
+  "mechanism_name": "防御阈值与上下文动力学",
+  "output_metrics": [
+    "Monotonic Ratio"
+  ],
+  "metric_directions": {
+    "Monotonic Ratio": "lower_better"
+  },
+  "metric_weights": {
+    "Monotonic Ratio": 1.0
+  },
+  "model_metric_values": [
+    {
+      "model_id": "gpt-5.4",
+      "metrics": {
+        "Monotonic Ratio": 0.5555555555555556
+      }
+    },
+    {
+      "model_id": "gpt-5.2",
+      "metrics": {
+        "Monotonic Ratio": 0.6666666666666666
+      }
+    },
+    {
+      "model_id": "gpt-4o",
+      "metrics": {
+        "Monotonic Ratio": 0.7222222222222222
+      }
+    },
+    {
+      "model_id": "gemini-3.1-pro",
+      "metrics": {
+        "Monotonic Ratio": 0.55
+      }
+    },
+    {
+      "model_id": "gpt-5",
+      "metrics": {
+        "Monotonic Ratio": 0.6111111111111112
+      }
+    },
+    {
+      "model_id": "glm-5",
+      "metrics": {
+        "Monotonic Ratio": 0.5833333333333333
+      }
+    },
+    {
+      "model_id": "grok-4.1",
+      "metrics": {
+        "Monotonic Ratio": 0.7222222222222222
+      }
+    },
+    {
+      "model_id": "kimi-2.5",
+      "metrics": {
+        "Monotonic Ratio": 0.5833333333333333
+      }
+    },
+    {
+      "model_id": "minmax-m2.5",
+      "metrics": {
+        "Monotonic Ratio": 0.6111111111111112
+      }
+    },
+    {
+      "model_id": "qwen3.5-397b",
+      "metrics": {
+        "Monotonic Ratio": 0.5555555555555556
+      }
+    }
+  ],
+  "metric_rankings": [
+    {
+      "metric": "Monotonic Ratio",
+      "direction": "lower_better",
+      "sorted_results": [
+        {
+          "model_id": "gemini-3.1-pro",
+          "value": 0.55
+        },
+        {
+          "model_id": "gpt-5.4",
+          "value": 0.5555555555555556
+        },
+        {
+          "model_id": "qwen3.5-397b",
+          "value": 0.5555555555555556
+        },
+        {
+          "model_id": "glm-5",
+          "value": 0.5833333333333333
+        },
+        {
+          "model_id": "kimi-2.5",
+          "value": 0.5833333333333333
+        },
+        {
+          "model_id": "gpt-5",
+          "value": 0.6111111111111112
+        },
+        {
+          "model_id": "minmax-m2.5",
+          "value": 0.6111111111111112
+        },
+        {
+          "model_id": "gpt-5.2",
+          "value": 0.6666666666666666
+        },
+        {
+          "model_id": "gpt-4o",
+          "value": 0.7222222222222222
+        },
+        {
+          "model_id": "grok-4.1",
+          "value": 0.7222222222222222
+        }
+      ]
+    }
+  ],
+  "composite_ranking": {
+    "metric": "Composite Score",
+    "direction": "higher_better",
+    "weights": {
+      "Monotonic Ratio": 1.0
+    },
+    "normalization": "min_max_by_metric_then_weighted_sum",
+    "sorted_results": [
+      {
+        "model_id": "gemini-3.1-pro",
+        "value": 1.0
+      },
+      {
+        "model_id": "gpt-5.4",
+        "value": 0.9677419354838711
+      },
+      {
+        "model_id": "qwen3.5-397b",
+        "value": 0.9677419354838711
+      },
+      {
+        "model_id": "glm-5",
+        "value": 0.8064516129032264
+      },
+      {
+        "model_id": "kimi-2.5",
+        "value": 0.8064516129032264
+      },
+      {
+        "model_id": "gpt-5",
+        "value": 0.6451612903225805
+      },
+      {
+        "model_id": "minmax-m2.5",
+        "value": 0.6451612903225805
+      },
+      {
+        "model_id": "gpt-5.2",
+        "value": 0.3225806451612906
+      },
+      {
+        "model_id": "gpt-4o",
+        "value": 0.0
+      },
+      {
+        "model_id": "grok-4.1",
+        "value": 0.0
+      }
+    ]
+  }
+}

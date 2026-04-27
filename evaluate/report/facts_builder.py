@@ -55,6 +55,49 @@ RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 ALT_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
 ASR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "asr_labels")
 FRR_LABEL_DIR = os.path.join(PROJECT_ROOT, "evaluation_report", "frr_labels")
+EXCLUDED_MODEL_DIRS = {"manifests", "runs"}
+
+
+def load_authoritative_models(results_dir: str = ALT_RESULTS_DIR) -> List[str]:
+    if not os.path.isdir(results_dir):
+        return []
+    models: List[str] = []
+    for name in sorted(os.listdir(results_dir)):
+        path = os.path.join(results_dir, name)
+        if not os.path.isdir(path) or name in EXCLUDED_MODEL_DIRS:
+            continue
+        models.append(name)
+    return models
+
+
+def filter_matrix_by_models(
+    matrix: Dict[str, Dict[str, float]],
+    allowed_models: Optional[Iterable[str]],
+) -> Dict[str, Dict[str, float]]:
+    if not allowed_models:
+        return matrix
+    allowed = set(allowed_models)
+    return {model: attacks for model, attacks in matrix.items() if model in allowed}
+
+
+def filter_row_list_by_models(
+    rows: List[Dict[str, object]],
+    allowed_models: Optional[Iterable[str]],
+) -> List[Dict[str, object]]:
+    if not allowed_models:
+        return rows
+    allowed = set(allowed_models)
+    return [row for row in rows if str(row.get("model") or "") in allowed]
+
+
+def filter_metric_map_by_models(
+    values: Dict[str, List[float]],
+    allowed_models: Optional[Iterable[str]],
+) -> Dict[str, List[float]]:
+    if not allowed_models:
+        return values
+    allowed = set(allowed_models)
+    return {model: vals for model, vals in values.items() if model in allowed}
 
 
 def normalize_attack_name(name: str) -> str:
@@ -100,6 +143,22 @@ def parse_attack_run(attack_run: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def _find_relpath_after_marker(input_path: str, marker_parts: Iterable[str]) -> Optional[str]:
+    normalized_parts = os.path.normpath(input_path).split(os.sep)
+    marker = list(marker_parts)
+    if not marker:
+        return None
+    max_idx = len(normalized_parts) - len(marker)
+    for idx in range(max_idx + 1):
+        if normalized_parts[idx : idx + len(marker)] != marker:
+            continue
+        suffix = normalized_parts[idx + len(marker) :]
+        if not suffix:
+            return ""
+        return os.path.join(*suffix)
+    return None
+
+
 def derive_attack_run(input_file: str) -> Tuple[str, str]:
     abs_input = os.path.abspath(input_file)
     candidate_roots = [os.path.abspath(RESULTS_DIR), ALT_RESULTS_DIR]
@@ -121,6 +180,22 @@ def derive_attack_run(input_file: str) -> Tuple[str, str]:
                 rel = rel_labels
                 break
     if rel is None:
+        rel = _find_relpath_after_marker(abs_input, ["data", "attack_results"])
+    if rel is None:
+        for marker in (["evaluation_report", "asr_labels"], ["evaluation_report", "frr_labels"]):
+            rel_labels = _find_relpath_after_marker(abs_input, marker)
+            if rel_labels is None:
+                continue
+            label_parts = rel_labels.split(os.sep)
+            if len(label_parts) >= 2:
+                model = label_parts[0]
+                attack = label_parts[1]
+                return f"{model}/{attack}", model
+            rel = rel_labels
+            break
+    if rel is None:
+        rel = _find_relpath_after_marker(abs_input, ["results"])
+    if rel is None:
         rel = os.path.basename(abs_input)
     if rel.endswith(".jsonl"):
         rel_no_ext = rel[:-6]
@@ -140,8 +215,14 @@ def read_summary_long(path: str) -> Tuple[List[Dict[str, str]], List[str]]:
             scorer = (row.get("scorer") or "").strip()
             if is_legacy_scorer_name(scorer):
                 continue
+            input_file = (row.get("input_file") or "").strip()
+            parsed = None
             attack_run = (row.get("attack_run") or "").strip()
-            parsed = parse_attack_run(attack_run)
+            if input_file:
+                derived_attack_run, _ = derive_attack_run(input_file)
+                parsed = parse_attack_run(derived_attack_run)
+            if not parsed:
+                parsed = parse_attack_run(attack_run)
             if not parsed:
                 if attack_run:
                     unparsed.append(attack_run)
@@ -496,9 +577,13 @@ def main() -> None:
     if not os.path.isfile(args.summary_long):
         raise SystemExit(f"summary_long.csv not found: {args.summary_long}")
 
+    authoritative_models = load_authoritative_models()
     rows, unparsed = read_summary_long(args.summary_long)
+    rows = filter_row_list_by_models(rows, authoritative_models)
     matrix = compute_model_attack_matrix(rows)
     frr_matrix = read_frr_reports(args.frr_dir)
+    matrix = filter_matrix_by_models(matrix, authoritative_models)
+    frr_matrix = filter_matrix_by_models(frr_matrix, authoritative_models)
     model_summary = compute_model_summary(matrix, frr_matrix)
     attack_summary = compute_attack_summary(matrix, frr_matrix)
     model_stats = compute_model_stats(matrix)
@@ -510,6 +595,11 @@ def main() -> None:
     )
     wsl_vals = read_metric_reports(args.wsl_dir, r"^Mean weighted loss:\s*([0-9.\-]+)")
     cm_vals = read_metric_reports(args.cm_dir, r"^Mean cost:\s*([0-9.\-]+)")
+
+    mds_summary = filter_row_list_by_models(mds_summary, authoritative_models)
+    bias_vals = filter_metric_map_by_models(bias_vals, authoritative_models)
+    wsl_vals = filter_metric_map_by_models(wsl_vals, authoritative_models)
+    cm_vals = filter_metric_map_by_models(cm_vals, authoritative_models)
 
     bias_mean = mean_by_model(bias_vals)
     wsl_mean = mean_by_model(wsl_vals)

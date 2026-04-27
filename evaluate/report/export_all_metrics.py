@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+ATTACK_RESULTS_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir, "data", "attack_results"))
+EXCLUDED_MODEL_DIRS = {"manifests", "runs"}
 DEFAULT_FACTS = os.path.join(PROJECT_ROOT, "evaluation_report", "facts.json")
 DEFAULT_OUTPUT = os.path.join(PROJECT_ROOT, "evaluation_report", "all_metrics_summary.csv")
 DEFAULT_SUMMARY_WIDE = os.path.join(PROJECT_ROOT, "evaluation_report", "asr", "summary_wide.csv")
@@ -58,10 +60,41 @@ def _as_int_text(value: Optional[int]) -> str:
     return str(value)
 
 
-def build_model_rows(facts: Dict[str, Any], kappa: Dict[str, Any]) -> List[Dict[str, Any]]:
-    model_summary = facts.get("model_summary") or []
-    mds_summary = facts.get("mds_summary") or []
-    metric_summary = facts.get("metric_summary") or []
+def load_authoritative_models(results_dir: str = ATTACK_RESULTS_DIR) -> List[str]:
+    if not os.path.isdir(results_dir):
+        return []
+    models: List[str] = []
+    for name in sorted(os.listdir(results_dir)):
+        path = os.path.join(results_dir, name)
+        if not os.path.isdir(path) or name in EXCLUDED_MODEL_DIRS:
+            continue
+        models.append(name)
+    return models
+
+
+def _filter_model_rows(rows: List[Dict[str, Any]], allowed_models: Optional[List[str]]) -> List[Dict[str, Any]]:
+    if not allowed_models:
+        return rows
+    allowed = set(allowed_models)
+    return [row for row in rows if str(row.get("model") or "") in allowed]
+
+
+def _parse_model_and_attack(attack_run: str, attack_group: str) -> tuple[str, str]:
+    if isinstance(attack_run, str) and "/" in attack_run:
+        model, attack = attack_run.split("/", 1)
+        return model, attack
+    model = attack_group if isinstance(attack_group, str) else ""
+    return model, ""
+
+
+def build_model_rows(
+    facts: Dict[str, Any],
+    kappa: Dict[str, Any],
+    allowed_models: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    model_summary = _filter_model_rows(facts.get("model_summary") or [], allowed_models)
+    mds_summary = _filter_model_rows(facts.get("mds_summary") or [], allowed_models)
+    metric_summary = _filter_model_rows(facts.get("metric_summary") or [], allowed_models)
 
     mds_map = {}
     for row in mds_summary:
@@ -174,11 +207,13 @@ def write_csv(path: str, rows: List[Dict[str, Any]]) -> None:
 
 
 def _build_model_metric_map(
-    facts: Dict[str, Any], kappa: Dict[str, Any]
+    facts: Dict[str, Any],
+    kappa: Dict[str, Any],
+    allowed_models: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    model_summary = facts.get("model_summary") or []
-    mds_summary = facts.get("mds_summary") or []
-    metric_summary = facts.get("metric_summary") or []
+    model_summary = _filter_model_rows(facts.get("model_summary") or [], allowed_models)
+    mds_summary = _filter_model_rows(facts.get("mds_summary") or [], allowed_models)
+    metric_summary = _filter_model_rows(facts.get("metric_summary") or [], allowed_models)
 
     model_map: Dict[str, Dict[str, Any]] = {}
     for row in model_summary:
@@ -232,14 +267,16 @@ def _build_model_metric_map(
 def build_detailed_rows(
     summary_wide_rows: List[Dict[str, str]],
     model_metric_map: Dict[str, Dict[str, Any]],
+    allowed_models: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
+    allowed = set(allowed_models or [])
     rows: List[Dict[str, str]] = []
     for row in summary_wide_rows:
         attack_run = row.get("attack_run", "")
-        model = row.get("attack_group", "")
-        attack = ""
-        if isinstance(attack_run, str) and "/" in attack_run:
-            _, attack = attack_run.split("/", 1)
+        attack_group = row.get("attack_group", "")
+        model, attack = _parse_model_and_attack(attack_run, attack_group)
+        if allowed and model not in allowed:
+            continue
         metrics = model_metric_map.get(model, {})
         out = dict(row)
         out["model"] = model
@@ -306,15 +343,16 @@ def main() -> None:
     if not os.path.isfile(args.summary_wide):
         raise SystemExit(f"summary_wide file not found: {args.summary_wide}")
 
+    authoritative_models = load_authoritative_models()
     facts = load_facts(args.facts)
     summary_wide_rows = load_csv_rows(args.summary_wide)
     kappa = facts.get("kappa_summary") if isinstance(facts.get("kappa_summary"), dict) else {}
-    model_rows = build_model_rows(facts, kappa)
+    model_rows = build_model_rows(facts, kappa, authoritative_models)
     attack_rows = build_attack_rows(facts, kappa)
     all_rows = model_rows + attack_rows
     write_csv(args.output, all_rows)
-    model_metric_map = _build_model_metric_map(facts, kappa)
-    detailed_rows = build_detailed_rows(summary_wide_rows, model_metric_map)
+    model_metric_map = _build_model_metric_map(facts, kappa, authoritative_models)
+    detailed_rows = build_detailed_rows(summary_wide_rows, model_metric_map, authoritative_models)
     write_dynamic_csv(args.detailed_output, detailed_rows)
     print(f"Wrote {args.output}")
     print(f"Wrote {args.detailed_output}")

@@ -1,6 +1,11 @@
 import type {
   AttackConfigOptionsResponse,
+  AuthUser,
   BenchmarkConfigOptionsResponse,
+  LoginPayload,
+  LoginResponse,
+  MechanismLeaderboardResponse,
+  MechanismOverviewResponse,
   LeaderboardResponse,
   ManagedTargetModelsResponse,
   QuickAttackDatasetsResponse,
@@ -14,8 +19,6 @@ import type {
   RunMetricTasksResponse
 } from "@/lib/types";
 
-const BASE_URL = (process.env.NEXT_PUBLIC_BFF_BASE_URL || "http://127.0.0.1:9000").replace(/\/+$/, "");
-
 class ApiError extends Error {
   statusCode: number;
 
@@ -25,18 +28,33 @@ class ApiError extends Error {
   }
 }
 
+function parseErrorMessage(raw: string): string {
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail;
+    }
+  } catch {
+    return raw;
+  }
+  return raw;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(path, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
       ...(options?.headers || {})
     },
     cache: "no-store"
   });
   if (!response.ok) {
     const raw = await response.text();
-    throw new ApiError(raw || `Request failed: ${response.status}`, response.status);
+    throw new ApiError(parseErrorMessage(raw) || `Request failed: ${response.status}`, response.status);
   }
   if (response.status === 204) {
     return {} as T;
@@ -117,6 +135,35 @@ export function getBenchmarkConfigOptions() {
 
 export function getLeaderboard() {
   return request<LeaderboardResponse>("/api/leaderboard");
+}
+
+export function getMechanismOverview() {
+  return request<MechanismOverviewResponse>("/api/mechanism/overview");
+}
+
+export function getMechanismLeaderboard() {
+  return request<MechanismLeaderboardResponse>("/api/mechanism/leaderboard");
+}
+
+export function getMechanismDashboardUrl() {
+  return "/api/mechanism/dashboard";
+}
+
+export function login(payload: LoginPayload) {
+  return request<LoginResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function logout() {
+  return request<{ ok: true }>("/api/auth/logout", {
+    method: "POST"
+  });
+}
+
+export function getCurrentUser() {
+  return request<AuthUser>("/api/auth/me");
 }
 
 export { ApiError };

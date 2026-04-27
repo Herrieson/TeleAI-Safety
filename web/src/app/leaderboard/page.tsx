@@ -3,15 +3,22 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatedNumber } from "@/components/common/AnimatedNumber";
 import { useI18n } from "@/components/common/LocaleProvider";
-import { ApiError, getLeaderboard } from "@/lib/api";
+import { ApiError, getLeaderboard, getMechanismLeaderboard } from "@/lib/api";
 import { formatDateTime } from "@/lib/i18n";
-import type { LeaderboardMetric, LeaderboardMetricBetter, LeaderboardResponse, LeaderboardRow } from "@/lib/types";
+import type {
+  LeaderboardMetric,
+  LeaderboardMetricBetter,
+  LeaderboardResponse,
+  LeaderboardRow,
+  MechanismLeaderboardResponse
+} from "@/lib/types";
 
 const POLL_INTERVAL_MS = 15000;
 
 const CLOSED_SOURCE_MODELS = new Set(["gpt-5.4", "gpt-4o", "gpt-5", "gpt-5.2", "grok-4.1", "gemini-3.1-pro"]);
 
 type RankMap = Map<string, number>;
+type MetricRangeMap = Map<string, { min: number; max: number }>;
 type ModelSourceType = "open" | "closed";
 type SourceFilter = "all" | ModelSourceType;
 
@@ -112,32 +119,59 @@ function metricDirectionText(metric: LeaderboardMetric, locale: "zh" | "en"): st
   return locale === "zh" ? "低优先" : "Lower Better";
 }
 
-function formatMetricValue(value: number | null | undefined, metric: LeaderboardMetric, locale: "zh" | "en"): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "-";
-  }
-  const localeTag = locale === "zh" ? "zh-CN" : "en-US";
-  if (metric.format === "percent") {
-    return `${(value * 100).toLocaleString(localeTag, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })}%`;
-  }
-  return value.toLocaleString(localeTag, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: Math.max(2, metric.precision)
+function buildMetricRangeMap(rows: LeaderboardRow[]): MetricRangeMap {
+  const accumulator = new Map<string, { min: number; max: number }>();
+
+  rows.forEach((row) => {
+    Object.entries(row.metrics || {}).forEach(([key, value]) => {
+      if (value === null || value === undefined || Number.isNaN(value)) {
+        return;
+      }
+      const current = accumulator.get(key);
+      if (!current) {
+        accumulator.set(key, { min: value, max: value });
+        return;
+      }
+      current.min = Math.min(current.min, value);
+      current.max = Math.max(current.max, value);
+    });
   });
+
+  return accumulator;
 }
 
-function formatPercentValue(value: number | null | undefined, locale: "zh" | "en"): string {
+function normalizeDisplayScore(
+  value: number | null | undefined,
+  better: LeaderboardMetricBetter,
+  range: { min: number; max: number } | undefined
+): number | null {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return null;
+  }
+
+  const comparableValue = normalizeMetricValue(value, better);
+  if (comparableValue === null || !range) {
+    return null;
+  }
+
+  if (range.max === range.min) {
+    return 1;
+  }
+
+  const ratio = (comparableValue - range.min) / (range.max - range.min);
+  const normalizedScore = better === "higher" ? ratio : 1 - ratio;
+  return Math.min(1, Math.max(0, normalizedScore));
+}
+
+function formatNormalizedScore(value: number | null | undefined, locale: "zh" | "en"): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
   }
   const localeTag = locale === "zh" ? "zh-CN" : "en-US";
-  return `${(value * 100).toLocaleString(localeTag, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })}%`;
+  return value.toLocaleString(localeTag, {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4
+  });
 }
 
 function rankChipClass(rank: number): string {
@@ -160,6 +194,14 @@ export default function LeaderboardPage() {
       ? {
           title: "模型指标排行榜",
           subtitle: "基于 evaluate/evaluation_report 与 benchmark/result 的模型对比视图。",
+          mechanismTitle: "脆弱性机理排行榜",
+          mechanismSubtitle: "基于 mechanism 输出的 6 机理综合名次，与主指标榜分开展示。",
+          mechanismAvgRank: "平均名次",
+          mechanismCoverage: "覆盖机理数",
+          mechanismNoData: "暂无脆弱性机理排行榜数据。",
+          mechanismSourceUpdated: "脆弱性机理数据更新时间",
+          mechanismSyncFailed: "本次未能加载脆弱性机理排行榜数据。",
+          mechanismTopModel: "脆弱性机理综合领先模型",
           monitor: "排行榜",
           metric: "排序指标",
           reverseOrder: "反向排序",
@@ -169,7 +211,6 @@ export default function LeaderboardPage() {
           loading: "正在加载排行榜...",
           noData: "暂无可展示的模型评估数据。",
           noRowsInFilter: "当前筛选下暂无模型。",
-          source: "数据源",
           sourceUpdated: "数据更新时间",
           lastUpdated: "页面更新时间",
           modelCount: "模型数",
@@ -177,8 +218,6 @@ export default function LeaderboardPage() {
           selectedRank: "当前指标排名",
           model: "模型",
           sourceType: "模型类型",
-          rowsHint: (count: number) => `当前显示 ${count} 个模型，指标列展示名次与数值。`,
-          direction: "推荐规则",
           sync: "同步中...",
           viewAsrDetail: "查看细项",
           hideAsrDetail: "收起细项",
@@ -197,6 +236,14 @@ export default function LeaderboardPage() {
       : {
           title: "Model Leaderboard",
           subtitle: "Model comparison from evaluate/evaluation_report and benchmark/result.",
+          mechanismTitle: "Mechanism Ranking",
+          mechanismSubtitle: "Six-mechanism ranking derived from mechanism outputs, shown separately from the main metric board.",
+          mechanismAvgRank: "Avg Rank",
+          mechanismCoverage: "Coverage",
+          mechanismNoData: "No mechanism ranking data available.",
+          mechanismSourceUpdated: "Mechanism Updated",
+          mechanismSyncFailed: "Mechanism ranking could not be loaded this time.",
+          mechanismTopModel: "Top Mechanism Model",
           monitor: "Leaderboard",
           metric: "Sort Metric",
           reverseOrder: "Reverse",
@@ -206,7 +253,6 @@ export default function LeaderboardPage() {
           loading: "Loading leaderboard...",
           noData: "No model metrics available.",
           noRowsInFilter: "No model matched the selected filter.",
-          source: "Source",
           sourceUpdated: "Source Updated",
           lastUpdated: "Page Updated",
           modelCount: "Models",
@@ -214,8 +260,6 @@ export default function LeaderboardPage() {
           selectedRank: "Selected Rank",
           model: "Model",
           sourceType: "Source",
-          rowsHint: (count: number) => `${count} model(s) shown, each metric column includes rank and value.`,
-          direction: "Recommended Rule",
           sync: "syncing...",
           viewAsrDetail: "View Detail",
           hideAsrDetail: "Hide Detail",
@@ -233,9 +277,11 @@ export default function LeaderboardPage() {
         };
 
   const [payload, setPayload] = useState<LeaderboardResponse | null>(null);
+  const [mechanismPayload, setMechanismPayload] = useState<MechanismLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [mechanismError, setMechanismError] = useState("");
   const [selectedMetricKey, setSelectedMetricKey] = useState("");
   const [reverseOrder, setReverseOrder] = useState(false);
   const [expandedAsrModel, setExpandedAsrModel] = useState("");
@@ -255,8 +301,18 @@ export default function LeaderboardPage() {
       setLoading(true);
     }
     try {
-      const data = await getLeaderboard();
-      setPayload(data);
+      const [leaderboardResult, mechanismResult] = await Promise.allSettled([getLeaderboard(), getMechanismLeaderboard()]);
+      if (leaderboardResult.status === "rejected") {
+        throw leaderboardResult.reason;
+      }
+      setPayload(leaderboardResult.value);
+      if (mechanismResult.status === "fulfilled") {
+        setMechanismPayload(mechanismResult.value);
+        setMechanismError("");
+      } else {
+        setMechanismPayload(null);
+        setMechanismError(mechanismResult.reason instanceof Error ? mechanismResult.reason.message : String(mechanismResult.reason));
+      }
       setLastUpdatedAt(Date.now());
       setError("");
     } catch (err) {
@@ -348,6 +404,13 @@ export default function LeaderboardPage() {
     return maps;
   }, [payload, sourceFilteredRows]);
 
+  const metricRanges = useMemo(() => {
+    if (!payload) {
+      return new Map<string, { min: number; max: number }>();
+    }
+    return buildMetricRangeMap(payload.rows);
+  }, [payload]);
+
   const selectedRankMap = useMemo(() => {
     if (!selectedMetric) {
       return new Map<string, number>();
@@ -380,6 +443,13 @@ export default function LeaderboardPage() {
     ],
     [text, sourceCounts]
   );
+
+  const mechanismTopRow = useMemo(() => {
+    if (!mechanismPayload?.rows?.length) {
+      return null;
+    }
+    return mechanismPayload.rows[0];
+  }, [mechanismPayload]);
 
   return (
     <section aria-busy={loading || refreshing} className="panel leaderboard-panel p-5">
@@ -474,18 +544,25 @@ export default function LeaderboardPage() {
             <AnimatedNumber value={payload?.metric_count || 0} />
           </p>
         </article>
+        <article className="stat-card">
+          <p className="label mb-2">{text.mechanismTopModel}</p>
+          <p className="text-base font-semibold text-slate-100">{mechanismTopRow?.model_id || "-"}</p>
+          <p className="helper-text">
+            {text.mechanismAvgRank}: {mechanismTopRow?.avg_rank ? mechanismTopRow.avg_rank.toFixed(2) : "-"}
+          </p>
+        </article>
       </div>
 
       <div className="section-card leaderboard-meta-card mb-4 flex flex-wrap items-center justify-between gap-3 p-4 text-xs">
         <div className="space-y-1">
           <p>
-            {text.source}: <span className="mono">{payload?.source_csv || "-"}</span>
-          </p>
-          <p>
             {text.sourceUpdated}: {payload?.source_updated_at ? formatDateTime(payload.source_updated_at, locale) : "-"}
           </p>
           <p>
             {text.lastUpdated}: {lastUpdatedAt ? formatDateTime(lastUpdatedAt, locale) : "-"}
+          </p>
+          <p>
+            {text.mechanismSourceUpdated}: {mechanismPayload?.generated_at ? formatDateTime(mechanismPayload.generated_at * 1000, locale) : "-"}
           </p>
         </div>
         {refreshing ? (
@@ -496,18 +573,13 @@ export default function LeaderboardPage() {
         ) : null}
       </div>
 
-      {selectedMetric ? (
-        <p className="notice leaderboard-direction-notice mb-4 text-xs">
-          {text.direction}: {metricDirectionText(selectedMetric, locale)}
-          <span className="mx-2">|</span>
-          {text.rowsHint(sortedRows.length)}
-        </p>
-      ) : null}
-
       {error ? (
         <p aria-live="assertive" className="notice notice-error mb-4" role="alert">
           {error}
         </p>
+      ) : null}
+      {mechanismError ? (
+        <p className="notice notice-warn mb-4">{text.mechanismSyncFailed}</p>
       ) : null}
 
       {loading ? (
@@ -517,94 +589,163 @@ export default function LeaderboardPage() {
       ) : sortedRows.length === 0 ? (
         <p className="notice p-4 text-sm text-slate-600">{text.noRowsInFilter}</p>
       ) : (
-        <div className="data-table-wrap leaderboard-table-wrap">
-          <table className="data-table leaderboard-table min-w-[1320px] bg-transparent">
-            <thead>
-              <tr>
-                <th className="font-semibold">{text.selectedRank}</th>
-                <th className="font-semibold">{text.model}</th>
-                <th className="font-semibold">{text.sourceType}</th>
-                {payload.metrics.map((metric) => (
-                  <th className="font-semibold" key={metric.key}>
-                    <div className="flex flex-col gap-1">
-                      <span>{metricLabel(metric, locale)}</span>
-                      <span className="mono text-[10px] text-slate-500">{metricDirectionText(metric, locale)}</span>
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedRows.map((row, rowIndex) => {
-                const currentRank = selectedRankMap.get(row.model) || 0;
-                const isAsrExpanded = expandedAsrModel === row.model;
-                return (
-                  <Fragment key={row.model}>
-                    <tr className={rowIndex % 2 === 0 ? "leaderboard-main-row leaderboard-main-row-even align-top text-sm" : "leaderboard-main-row leaderboard-main-row-odd align-top text-sm"}>
-                      <td className="leaderboard-fixed-cell">
-                        <span className={rankChipClass(currentRank)}>{currentRank > 0 ? `#${currentRank}` : "-"}</span>
-                      </td>
-                      <td>
-                        <p className="font-headline font-semibold text-slate-100">{row.model}</p>
-                      </td>
-                      <td className="leaderboard-fixed-cell">
-                        {resolveModelSourceType(row.model) === "closed" ? (
-                          <span className="mode-chip mode-chip-benchmark">{text.closedSourceLabel}</span>
-                        ) : (
-                          <span className="mode-chip mode-chip-eval">{text.openSourceLabel}</span>
-                        )}
-                      </td>
-                      {payload.metrics.map((metric) => {
-                        const rankMap = rankMapsByMetric.get(metric.key);
-                        const rank = rankMap?.get(row.model) || 0;
-                        const isAsrMetric = metric.key === "asr";
-                        return (
-                          <td className={isAsrMetric && isAsrExpanded ? "leaderboard-metric-td leaderboard-metric-td-expanded" : "leaderboard-metric-td"} key={`${row.model}:${metric.key}`}>
-                            <div className="leaderboard-metric-cell">
-                              <p className="leaderboard-metric-value">{formatMetricValue(row.metrics[metric.key], metric, locale)}</p>
-                              <div className="leaderboard-metric-meta">
-                                <span className="mode-chip mode-chip-attack">{rank > 0 ? `#${rank}` : "-"}</span>
-                                {isAsrMetric ? (
-                                  <button
-                                    className={isAsrExpanded ? "leaderboard-detail-toggle leaderboard-detail-toggle-active" : "leaderboard-detail-toggle"}
-                                    onClick={() => setExpandedAsrModel((prev) => (prev === row.model ? "" : row.model))}
-                                    type="button"
-                                  >
-                                    {isAsrExpanded ? text.hideAsrDetail : text.viewAsrDetail}
-                                  </button>
-                                ) : null}
+        <>
+          <div className="data-table-wrap leaderboard-table-wrap">
+            <table className="data-table leaderboard-table min-w-[1320px] bg-transparent">
+              <thead>
+                <tr>
+                  <th className="font-semibold">{text.selectedRank}</th>
+                  <th className="font-semibold">{text.model}</th>
+                  <th className="font-semibold">{text.sourceType}</th>
+                  {payload.metrics.map((metric) => (
+                    <th className="font-semibold" key={metric.key}>
+                      <div className="flex flex-col gap-1">
+                        <span>{metricLabel(metric, locale)}</span>
+                        <span className="mono text-[10px] text-slate-500">{metricDirectionText(metric, locale)}</span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedRows.map((row, rowIndex) => {
+                  const currentRank = selectedRankMap.get(row.model) || 0;
+                  const isAsrExpanded = expandedAsrModel === row.model;
+                  return (
+                    <Fragment key={row.model}>
+                      <tr className={rowIndex % 2 === 0 ? "leaderboard-main-row leaderboard-main-row-even align-top text-sm" : "leaderboard-main-row leaderboard-main-row-odd align-top text-sm"}>
+                        <td className="leaderboard-fixed-cell">
+                          <span className={rankChipClass(currentRank)}>{currentRank > 0 ? `#${currentRank}` : "-"}</span>
+                        </td>
+                        <td>
+                          <p className="font-headline font-semibold text-slate-100">{row.model}</p>
+                        </td>
+                        <td className="leaderboard-fixed-cell">
+                          {resolveModelSourceType(row.model) === "closed" ? (
+                            <span className="mode-chip mode-chip-benchmark">{text.closedSourceLabel}</span>
+                          ) : (
+                            <span className="mode-chip mode-chip-eval">{text.openSourceLabel}</span>
+                          )}
+                        </td>
+                        {payload.metrics.map((metric) => {
+                          const rankMap = rankMapsByMetric.get(metric.key);
+                          const rank = rankMap?.get(row.model) || 0;
+                          const isAsrMetric = metric.key === "asr";
+                          const normalizedScore = normalizeDisplayScore(row.metrics[metric.key], metric.better, metricRanges.get(metric.key));
+                          return (
+                            <td className={isAsrMetric && isAsrExpanded ? "leaderboard-metric-td leaderboard-metric-td-expanded" : "leaderboard-metric-td"} key={`${row.model}:${metric.key}`}>
+                              <div className="leaderboard-metric-cell">
+                                <p className="leaderboard-metric-value">{formatNormalizedScore(normalizedScore, locale)}</p>
+                                <div className="leaderboard-metric-meta">
+                                  <span className="mode-chip mode-chip-attack">{rank > 0 ? `#${rank}` : "-"}</span>
+                                  {isAsrMetric ? (
+                                    <button
+                                      className={isAsrExpanded ? "leaderboard-detail-toggle leaderboard-detail-toggle-active" : "leaderboard-detail-toggle"}
+                                      onClick={() => setExpandedAsrModel((prev) => (prev === row.model ? "" : row.model))}
+                                      type="button"
+                                    >
+                                      {isAsrExpanded ? text.hideAsrDetail : text.viewAsrDetail}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                      {isAsrExpanded ? (
+                        <tr className="leaderboard-detail-row align-top text-sm">
+                          <td colSpan={3 + payload.metrics.length}>
+                            <div className="section-card leaderboard-asr-card p-3">
+                              <p className="label mb-2">{text.asrDetailTitle(row.model)}</p>
+                              <div className="flex flex-wrap items-center gap-2 text-xs">
+                                <span className="mode-chip mode-chip-attack">
+                                  {text.asrEffective}: {formatNormalizedScore(normalizeDisplayScore(row.metrics.asr_effective, "lower", metricRanges.get("asr_effective")), locale)}
+                                </span>
+                                <span className="mode-chip mode-chip-attack">
+                                  {text.asrStrict}: {formatNormalizedScore(normalizeDisplayScore(row.metrics.asr_strict, "lower", metricRanges.get("asr_strict")), locale)}
+                                </span>
+                                <span className="mode-chip mode-chip-attack">
+                                  {text.asrLegacy}: {formatNormalizedScore(normalizeDisplayScore(row.metrics.asr_legacy, "lower", metricRanges.get("asr_legacy")), locale)}
+                                </span>
                               </div>
                             </div>
                           </td>
-                        );
-                      })}
-                    </tr>
-                    {isAsrExpanded ? (
-                      <tr className="leaderboard-detail-row align-top text-sm">
-                        <td colSpan={3 + payload.metrics.length}>
-                          <div className="section-card leaderboard-asr-card p-3">
-                            <p className="label mb-2">{text.asrDetailTitle(row.model)}</p>
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className="mode-chip mode-chip-attack">
-                                {text.asrEffective}: {formatPercentValue(row.metrics.asr_effective, locale)}
-                              </span>
-                              <span className="mode-chip mode-chip-attack">
-                                {text.asrStrict}: {formatPercentValue(row.metrics.asr_strict, locale)}
-                              </span>
-                              <span className="mode-chip mode-chip-attack">
-                                {text.asrLegacy}: {formatPercentValue(row.metrics.asr_legacy, locale)}
-                              </span>
-                            </div>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <section className="mt-5">
+            <div className="mb-4">
+              <p className="label">{text.monitor}</p>
+              <h3 className="font-headline text-xl font-semibold text-slate-100">{text.mechanismTitle}</h3>
+              <p className="mt-1 text-sm text-slate-500">{text.mechanismSubtitle}</p>
+            </div>
+
+            {!mechanismPayload || !mechanismPayload.available || mechanismPayload.rows.length === 0 ? (
+              <p className="notice p-4 text-sm text-slate-600">{text.mechanismNoData}</p>
+            ) : (
+              <div className="data-table-wrap leaderboard-table-wrap">
+                <table className="data-table leaderboard-table min-w-[1120px] bg-transparent">
+                  <thead>
+                    <tr>
+                      <th className="font-semibold">{text.selectedRank}</th>
+                      <th className="font-semibold">{text.model}</th>
+                      <th className="font-semibold">{text.mechanismAvgRank}</th>
+                      <th className="font-semibold">{text.mechanismCoverage}</th>
+                      {mechanismPayload.mechanisms.map((mechanism) => (
+                        <th className="font-semibold" key={mechanism.mechanism_id}>
+                          <div className="flex flex-col gap-1">
+                            <span>{mechanism.mechanism_id}</span>
+                            <span className="mono text-[10px] text-slate-500">{mechanism.mechanism_name}</span>
                           </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mechanismPayload.rows.map((row, rowIndex) => (
+                      <tr className={rowIndex % 2 === 0 ? "leaderboard-main-row leaderboard-main-row-even align-top text-sm" : "leaderboard-main-row leaderboard-main-row-odd align-top text-sm"} key={row.model_id}>
+                        <td className="leaderboard-fixed-cell">
+                          <span className={rankChipClass(rowIndex + 1)}>#{rowIndex + 1}</span>
                         </td>
+                        <td>
+                          <p className="font-headline font-semibold text-slate-100">{row.model_id}</p>
+                        </td>
+                        <td className="leaderboard-fixed-cell">
+                          <p className="leaderboard-metric-value">{row.avg_rank === null ? "-" : row.avg_rank.toFixed(2)}</p>
+                        </td>
+                        <td className="leaderboard-fixed-cell">
+                          <span className="mode-chip mode-chip-full">
+                            {row.covered}/{mechanismPayload.mechanism_count}
+                          </span>
+                        </td>
+                        {mechanismPayload.mechanisms.map((mechanism) => {
+                          const entry = row.mechanism_ranks[mechanism.mechanism_id];
+                          return (
+                            <td className="leaderboard-metric-td leaderboard-metric-td-expanded" key={`${row.model_id}:${mechanism.mechanism_id}`}>
+                              <div className="leaderboard-metric-cell">
+                                <p className="leaderboard-metric-value">{entry?.score === null || entry?.score === undefined ? "-" : entry.score.toFixed(4)}</p>
+                                <div className="leaderboard-metric-meta">
+                                  <span className="mode-chip mode-chip-attack">{entry?.rank ? `#${entry.rank}` : "-"}</span>
+                                </div>
+                              </div>
+                            </td>
+                          );
+                        })}
                       </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
       )}
     </section>
   );

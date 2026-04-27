@@ -2,6 +2,12 @@ export type RunMode = "attack_only" | "benchmark_only" | "eval_only" | "full_pip
 export type RunStatus = "pending" | "running" | "succeeded" | "failed" | "canceled";
 export type StageName = "attack" | "benchmark" | "evaluate";
 export type StageStatus = "pending" | "running" | "succeeded" | "failed" | "canceled";
+export type AuthRole = "admin" | "user";
+
+export type AuthUser = {
+  username: string;
+  role: AuthRole;
+};
 
 export type RunStage = {
   stage: StageName;
@@ -40,6 +46,7 @@ export type Run = {
   quick_attack_methods: string[];
   quick_dataset_key: string;
   managed_target_model_id: string;
+  owner_username: string;
   requester_ip: string;
   created_at: string;
   updated_at: string;
@@ -67,6 +74,15 @@ export type RunCreatePayload = {
   managed_target_model_id?: string;
   managed_access_code?: string;
   requester_ip?: string;
+};
+
+export type LoginPayload = {
+  username: string;
+  password: string;
+};
+
+export type LoginResponse = {
+  user: AuthUser;
 };
 
 export type RunLogsResponse = {
@@ -194,4 +210,63 @@ export type LeaderboardResponse = {
   metric_count: number;
   metrics: LeaderboardMetric[];
   rows: LeaderboardRow[];
+};
+
+export type MechanismMetricSnapshot = {
+  metric: string;
+  direction: "higher_better" | "lower_better";
+  best_model: string | null;
+  best_value: number | null;
+  worst_model: string | null;
+  worst_value: number | null;
+  average_value: number | null;
+};
+
+export type MechanismOverviewItem = {
+  mechanism_id: string;
+  mechanism_name: string;
+  module: string;
+  output_file: string;
+  metric_count: number;
+  model_count: number;
+  top_model: string | null;
+  top_score: number | null;
+  metrics: MechanismMetricSnapshot[];
+};
+
+export type MechanismOverviewResponse = {
+  available: boolean;
+  output_root: string;
+  dashboard_available: boolean;
+  dashboard_path: string;
+  generated_at: number | null;
+  mechanism_count: number;
+  model_count: number;
+  mechanisms: MechanismOverviewItem[];
+};
+
+export type MechanismLeaderboardMechanism = {
+  mechanism_id: string;
+  mechanism_name: string;
+};
+
+export type MechanismLeaderboardRank = {
+  rank: number | null;
+  score: number | null;
+};
+
+export type MechanismLeaderboardRow = {
+  model_id: string;
+  covered: number;
+  avg_rank: number | null;
+  mechanism_ranks: Record<string, MechanismLeaderboardRank>;
+};
+
+export type MechanismLeaderboardResponse = {
+  available: boolean;
+  generated_at: number | null;
+  mechanism_count: number;
+  model_count: number;
+  mechanisms: MechanismLeaderboardMechanism[];
+  rows: MechanismLeaderboardRow[];
 };

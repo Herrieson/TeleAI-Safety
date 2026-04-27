@@ -27,6 +27,20 @@ def _call(method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> A
         raise HTTPException(status_code=502, detail=f"orchestrator unreachable: {exc.reason}") from exc
 
 
+def _call_text(method: str, path: str) -> str:
+    url = f"{settings.orchestrator_base_url}{path}"
+    req = request.Request(url=url, method=method)
+    try:
+        with request.urlopen(req, timeout=settings.timeout_seconds) as resp:
+            return resp.read().decode("utf-8")
+    except error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        detail = raw or str(exc)
+        raise HTTPException(status_code=exc.code, detail=detail) from exc
+    except error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"orchestrator unreachable: {exc.reason}") from exc
+
+
 def health() -> Any:
     return _call("GET", "/health")
 
@@ -97,3 +111,15 @@ def get_leaderboard() -> Any:
 
 def get_managed_target_models() -> Any:
     return _call("GET", "/v1/managed-target-models")
+
+
+def get_mechanism_overview() -> Any:
+    return _call("GET", "/v1/mechanism/overview")
+
+
+def get_mechanism_leaderboard() -> Any:
+    return _call("GET", "/v1/mechanism/leaderboard")
+
+
+def get_mechanism_dashboard_html() -> str:
+    return _call_text("GET", "/v1/mechanism/dashboard")

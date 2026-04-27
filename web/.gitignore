@@ -1,5 +1,6 @@
 .next
 .next_*
+.next.bak-*/
 node_modules
 out
 dist

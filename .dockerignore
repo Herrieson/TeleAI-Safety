@@ -1,0 +1,32 @@
+# Git / local tooling
+.git
+.gitignore
+.dev-runtime
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+
+# Python / test caches
+.pytest_cache
+.mypy_cache
+.coverage*
+htmlcov
+
+# Node / Next.js
+web/node_modules
+web/.next
+
+# Generated run outputs and large local artifacts
+data/service_runs
+data/attack_results
+benchmark/result
+evaluate/evaluation_report
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store

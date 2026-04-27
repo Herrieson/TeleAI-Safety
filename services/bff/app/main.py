@@ -4,7 +4,9 @@ from time import monotonic
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
+from .auth import AuthError, create_session_token, decode_session_token, verify_password
 from .config import settings
 from .orchestrator_client import (
     get_attack_config_options as orchestrator_get_attack_config_options,
@@ -18,6 +20,9 @@ from .orchestrator_client import (
     get_metric_tasks as orchestrator_get_metric_tasks,
     get_leaderboard as orchestrator_get_leaderboard,
     get_managed_target_models as orchestrator_get_managed_target_models,
+    get_mechanism_dashboard_html as orchestrator_get_mechanism_dashboard_html,
+    get_mechanism_leaderboard as orchestrator_get_mechanism_leaderboard,
+    get_mechanism_overview as orchestrator_get_mechanism_overview,
     get_quick_attack_datasets as orchestrator_get_quick_attack_datasets,
     get_quick_attack_methods as orchestrator_get_quick_attack_methods,
     get_run as orchestrator_get_run,
@@ -25,7 +30,8 @@ from .orchestrator_client import (
     list_artifacts as orchestrator_list_artifacts,
     list_runs as orchestrator_list_runs,
 )
-from .schemas import RunCreateRequest
+from .schemas import AuthUserResponse, LoginRequest, LoginResponse, RunCreateRequest
+from .user_store import UserRecord, UserStore, normalize_username
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
@@ -40,6 +46,7 @@ app.add_middleware(
 
 _managed_submit_lock = Lock()
 _managed_last_submit_by_ip: dict[str, float] = {}
+user_store = UserStore(settings.auth_users_file)
 
 
 @app.get("/health")
@@ -60,6 +67,42 @@ def api_health() -> dict:
         "service": settings.app_name,
         "orchestrator": upstream,
     }
+
+
+def _user_response(user: UserRecord) -> AuthUserResponse:
+    return AuthUserResponse(username=user.username, role=user.role)
+
+
+def _extract_bearer_token(request: Request) -> str:
+    auth_header = request.headers.get("authorization", "").strip()
+    if not auth_header:
+        return ""
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer":
+        return ""
+    return token.strip()
+
+
+def _current_user_from_request(request: Request) -> UserRecord:
+    token = _extract_bearer_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="authentication required")
+    try:
+        payload = decode_session_token(token, secret=settings.session_secret)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    username = normalize_username(str(payload.get("sub") or ""))
+    user = user_store.get(username)
+    if user is None or not user.enabled:
+        raise HTTPException(status_code=401, detail="user is disabled or missing")
+    if user.role != payload.get("role"):
+        raise HTTPException(status_code=401, detail="session role mismatch")
+    return user
+
+
+def _is_admin(user: UserRecord) -> bool:
+    return user.role == "admin"
 
 
 def _extract_client_ip(request: Request) -> str:
@@ -99,6 +142,24 @@ def _count_active_managed_runs_for_ip(runs: list[dict], ip: str) -> int:
         if managed_id and requester_ip == ip:
             count += 1
     return count
+
+
+def _filter_runs_for_user(runs_payload: list[dict], user: UserRecord) -> list[dict]:
+    if _is_admin(user):
+        return runs_payload
+    return [row for row in runs_payload if str(row.get("owner_username") or "").strip() == user.username]
+
+
+def _get_run_for_user(run_id: str, user: UserRecord) -> dict:
+    run = orchestrator_get_run(run_id)
+    if not isinstance(run, dict):
+        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+    if _is_admin(user):
+        return run
+    owner_username = str(run.get("owner_username") or "").strip()
+    if owner_username != user.username:
+        raise HTTPException(status_code=404, detail=f"run not found: {run_id}")
+    return run
 
 
 def _is_ip_whitelisted(ip: str) -> bool:
@@ -176,18 +237,42 @@ def _enforce_managed_run_limits(*, client_ip: str) -> None:
         if wait_seconds > 0:
             raise HTTPException(
                 status_code=429,
-                detail=(
-                    "managed mode cooldown in effect. Please retry in "
-                    f"{int(wait_seconds) + 1}s."
-                ),
+                detail=("managed mode cooldown in effect. Please retry in " f"{int(wait_seconds) + 1}s."),
             )
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest):
+    username = normalize_username(payload.username)
+    user = user_store.get(username)
+    if user is None or not user.enabled or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="invalid username or password")
+
+    token = create_session_token(
+        username=user.username,
+        role=user.role,
+        secret=settings.session_secret,
+        ttl_seconds=settings.session_ttl_seconds,
+    )
+    return LoginResponse(
+        token=token,
+        session_ttl_seconds=settings.session_ttl_seconds,
+        user=_user_response(user),
+    )
+
+
+@app.get("/api/auth/me", response_model=AuthUserResponse)
+def me(request: Request):
+    return _user_response(_current_user_from_request(request))
 
 
 @app.post("/api/runs")
 def create_run(payload: RunCreateRequest, request: Request):
+    current_user = _current_user_from_request(request)
     client_ip = _extract_client_ip(request)
     payload_dict = payload.model_dump()
     payload_dict["requester_ip"] = client_ip
+    payload_dict["owner_username"] = current_user.username
     payload_dict.pop("managed_access_code", None)
 
     is_managed_mode = bool(str(payload.managed_target_model_id or "").strip())
@@ -203,71 +288,113 @@ def create_run(payload: RunCreateRequest, request: Request):
 
 
 @app.get("/api/runs")
-def list_runs():
-    return orchestrator_list_runs()
+def list_runs(request: Request):
+    current_user = _current_user_from_request(request)
+    runs_payload = orchestrator_list_runs()
+    if not isinstance(runs_payload, list):
+        return []
+    return _filter_runs_for_user(runs_payload, current_user)
 
 
 @app.get("/api/runs/{run_id}")
-def get_run(run_id: str):
-    return orchestrator_get_run(run_id)
+def get_run(run_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    return _get_run_for_user(run_id, current_user)
 
 
 @app.post("/api/runs/{run_id}/cancel")
-def cancel_run(run_id: str):
+def cancel_run(run_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_cancel_run(run_id)
 
 
 @app.delete("/api/runs/{run_id}")
-def delete_run(run_id: str):
+def delete_run(run_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_delete_run(run_id)
 
 
 @app.get("/api/runs/{run_id}/artifacts")
-def list_artifacts(run_id: str):
+def list_artifacts(run_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_list_artifacts(run_id)
 
 
 @app.get("/api/runs/{run_id}/logs")
 def get_logs(
     run_id: str,
+    request: Request,
     stage: str = Query(default=""),
     tail_lines: int = Query(default=200, ge=1, le=5000),
 ):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_get_logs(run_id=run_id, stage=stage, tail_lines=tail_lines)
 
 
 @app.get("/api/runs/{run_id}/metrics/summary")
-def get_metric_summary(run_id: str):
+def get_metric_summary(run_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_get_metric_summary(run_id)
 
 
 @app.get("/api/runs/{run_id}/metrics/tasks")
-def get_metric_tasks(run_id: str):
+def get_metric_tasks(run_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_get_metric_tasks(run_id)
 
 
 @app.get("/api/runs/{run_id}/metrics/tasks/{task_id}/report")
-def export_metric_task_report(run_id: str, task_id: str):
+def export_metric_task_report(run_id: str, task_id: str, request: Request):
+    current_user = _current_user_from_request(request)
+    _get_run_for_user(run_id, current_user)
     return orchestrator_export_metric_task_report(run_id, task_id)
 
 
 @app.get("/api/leaderboard")
-def get_leaderboard():
+def get_leaderboard(request: Request):
+    _current_user_from_request(request)
     return orchestrator_get_leaderboard()
 
 
+@app.get("/api/mechanism/overview")
+def get_mechanism_overview(request: Request):
+    _current_user_from_request(request)
+    return orchestrator_get_mechanism_overview()
+
+
+@app.get("/api/mechanism/leaderboard")
+def get_mechanism_leaderboard(request: Request):
+    _current_user_from_request(request)
+    return orchestrator_get_mechanism_leaderboard()
+
+
+@app.get("/api/mechanism/dashboard")
+def get_mechanism_dashboard(request: Request):
+    _current_user_from_request(request)
+    return HTMLResponse(content=orchestrator_get_mechanism_dashboard_html())
+
+
 @app.get("/api/quick-attack/methods")
-def get_quick_attack_methods():
+def get_quick_attack_methods(request: Request):
+    _current_user_from_request(request)
     return orchestrator_get_quick_attack_methods()
 
 
 @app.get("/api/quick-attack/datasets")
-def get_quick_attack_datasets():
+def get_quick_attack_datasets(request: Request):
+    _current_user_from_request(request)
     return orchestrator_get_quick_attack_datasets()
 
 
 @app.get("/api/managed-target-models")
 def get_managed_target_models(request: Request):
+    _current_user_from_request(request)
     client_ip = _extract_client_ip(request)
     access_policy = _managed_access_policy(client_ip)
     data = orchestrator_get_managed_target_models()
@@ -283,10 +410,12 @@ def get_managed_target_models(request: Request):
 
 
 @app.get("/api/attack/config-options")
-def get_attack_config_options():
+def get_attack_config_options(request: Request):
+    _current_user_from_request(request)
     return orchestrator_get_attack_config_options()
 
 
 @app.get("/api/benchmark/config-options")
-def get_benchmark_config_options():
+def get_benchmark_config_options(request: Request):
+    _current_user_from_request(request)
     return orchestrator_get_benchmark_config_options()

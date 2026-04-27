@@ -17,6 +17,8 @@ class Settings:
     timezone: str = os.getenv("TELEAI_TZ", "Asia/Shanghai")
     repo_root: Path = Path(__file__).resolve().parents[3]
     run_log_root: Path = repo_root / "data" / "service_runs"
+    mechanism_root: Path = repo_root / "mechanism"
+    mechanism_output_root: Path = mechanism_root / "mechanism_outputs"
     internal_llm_api_key: str = os.getenv("TELEAI_INTERNAL_LLM_API_KEY", "").strip()
     internal_llm_base_url: str = os.getenv("TELEAI_INTERNAL_LLM_BASE_URL", "").strip()
     internal_llm_model: str = os.getenv("TELEAI_INTERNAL_LLM_MODEL", "").strip()

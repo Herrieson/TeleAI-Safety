@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, cancelRun, deleteRun, getRuns } from "@/lib/api";
 import { AnimatedNumber } from "@/components/common/AnimatedNumber";
@@ -24,14 +25,12 @@ export default function RunsPage() {
       ? {
           monitor: "运行监控",
           title: "流水线任务",
-          autoRefresh: (seconds: number) => `每 ${seconds} 秒自动刷新，可使用状态筛选快速过滤。`,
-          opsDashboard: "运维面板",
-          pipelineTelemetry: "流水线遥测",
-          liveView: "实时视图",
-          status: "状态",
-          keyword: "关键词",
-          keywordPlaceholder: "按任务名或 run id 搜索",
-          clearSearch: "清空",
+          refreshPausedHidden: "页面隐藏时已暂停自动刷新。",
+          refreshHealthy: "自动刷新正常运行。",
+          emptyTitle: "还没有任何流水线任务",
+          emptyDesc: "可以先创建一个任务，之后这里会自动显示最新状态和阶段进度。",
+          createRun: "新建任务",
+          openGuide: "查看使用引导",
           refreshing: "刷新中...",
           refresh: "刷新",
           totalRuns: "总任务数",
@@ -51,14 +50,12 @@ export default function RunsPage() {
       : {
           monitor: "Run Monitor",
           title: "Pipeline Runs",
-          autoRefresh: (seconds: number) => `Auto refresh every ${seconds}s. Use status chips for quick filtering.`,
-          opsDashboard: "Ops Dashboard",
-          pipelineTelemetry: "Pipeline Telemetry",
-          liveView: "Live View",
-          status: "Status",
-          keyword: "Keyword",
-          keywordPlaceholder: "Search by run name or run id",
-          clearSearch: "Clear",
+          refreshPausedHidden: "Auto refresh is paused while the page is hidden.",
+          refreshHealthy: "Auto refresh is running normally.",
+          emptyTitle: "No pipeline runs yet",
+          emptyDesc: "Create a run first. This monitor will then keep the latest status and stage progress up to date.",
+          createRun: "Create Run",
+          openGuide: "Open Guide",
           refreshing: "Refreshing...",
           refresh: "Refresh",
           totalRuns: "Total Runs",
@@ -78,23 +75,22 @@ export default function RunsPage() {
 
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | RunStatus>("all");
-  const [keyword, setKeyword] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [actionState, setActionState] = useState<{ runId: string; kind: "cancel" | "delete" } | null>(null);
   const [isPageVisible, setIsPageVisible] = useState(true);
   const loadingRef = useRef(false);
 
-  const loadRuns = useCallback(async (background = false) => {
+  const loadRuns = useCallback(async (mode: "initial" | "manual" | "background" = "initial") => {
     if (loadingRef.current) {
       return;
     }
     loadingRef.current = true;
-    if (background) {
-      setRefreshing(true);
-    } else {
+    if (mode === "manual") {
+      setManualRefreshing(true);
+    } else if (mode === "initial") {
       setLoading(true);
     }
     try {
@@ -107,13 +103,13 @@ export default function RunsPage() {
       setError(message);
     } finally {
       setLoading(false);
-      setRefreshing(false);
+      setManualRefreshing(false);
       loadingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    void loadRuns(false);
+    void loadRuns("initial");
   }, [loadRuns]);
 
   useEffect(() => {
@@ -130,10 +126,16 @@ export default function RunsPage() {
       return;
     }
     const timer = setInterval(() => {
-      void loadRuns(true);
+      void loadRuns("background");
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [loadRuns, isPageVisible]);
+
+  useEffect(() => {
+    if (isPageVisible) {
+      void loadRuns("background");
+    }
+  }, [isPageVisible, loadRuns]);
 
   const statusCounts = useMemo<Record<"all" | RunStatus, number>>(() => {
     const counts: Record<"all" | RunStatus, number> = {
@@ -151,26 +153,29 @@ export default function RunsPage() {
   }, [runs]);
 
   const filteredRuns = useMemo(() => {
-    const query = keyword.trim().toLowerCase();
     return runs
       .filter((run) => {
         if (statusFilter !== "all" && run.status !== statusFilter) {
           return false;
         }
-        if (!query) {
-          return true;
-        }
-        return run.name.toLowerCase().includes(query) || run.run_id.toLowerCase().includes(query);
+        return true;
       })
       .sort((left, right) => {
-        const leftTime = Date.parse(left.updated_at);
-        const rightTime = Date.parse(right.updated_at);
-        if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) {
-          return right.updated_at.localeCompare(left.updated_at);
+        const leftCreatedTime = Date.parse(left.created_at);
+        const rightCreatedTime = Date.parse(right.created_at);
+        if (Number.isFinite(leftCreatedTime) && Number.isFinite(rightCreatedTime) && leftCreatedTime !== rightCreatedTime) {
+          return rightCreatedTime - leftCreatedTime;
         }
-        return rightTime - leftTime;
+
+        const leftUpdatedTime = Date.parse(left.updated_at);
+        const rightUpdatedTime = Date.parse(right.updated_at);
+        if (Number.isFinite(leftUpdatedTime) && Number.isFinite(rightUpdatedTime) && leftUpdatedTime !== rightUpdatedTime) {
+          return rightUpdatedTime - leftUpdatedTime;
+        }
+
+        return right.run_id.localeCompare(left.run_id);
       });
-  }, [keyword, runs, statusFilter]);
+  }, [runs, statusFilter]);
 
   const runStats = useMemo(() => {
     const total = runs.length;
@@ -186,7 +191,7 @@ export default function RunsPage() {
       setActionState({ runId, kind: "cancel" });
       try {
         await cancelRun(runId);
-        await loadRuns(true);
+        await loadRuns("background");
       } catch (err) {
         const message = err instanceof ApiError ? err.message : String(err);
         setError(message);
@@ -205,7 +210,7 @@ export default function RunsPage() {
       setActionState({ runId, kind: "delete" });
       try {
         await deleteRun(runId);
-        await loadRuns(true);
+        await loadRuns("background");
       } catch (err) {
         const message = err instanceof ApiError ? err.message : String(err);
         setError(message);
@@ -217,65 +222,17 @@ export default function RunsPage() {
   );
 
   const filterValues: Array<"all" | RunStatus> = ["all", "pending", "running", "succeeded", "failed", "canceled"];
-  const trimmedKeyword = keyword.trim();
+  const refreshStatusText = !isPageVisible ? text.refreshPausedHidden : text.refreshHealthy;
   const emptyMessage = runs.length
-    ? trimmedKeyword && statusFilter !== "all"
-      ? text.noMatchCombined(statusFilterLabel(statusFilter, locale), trimmedKeyword)
-      : trimmedKeyword
-        ? text.noMatchKeyword(trimmedKeyword)
-        : text.noMatch(statusFilterLabel(statusFilter, locale))
+    ? text.noMatch(statusFilterLabel(statusFilter, locale))
     : text.noRuns;
 
   return (
-    <section aria-busy={loading || refreshing} className="panel p-5">
+    <section aria-busy={loading || manualRefreshing} className="panel p-5">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="label">{text.monitor}</p>
           <h2 className="title-gradient font-headline text-2xl font-semibold">{text.title}</h2>
-          <p className="mt-1 text-sm text-slate-600">{text.autoRefresh(Math.floor(POLL_INTERVAL_MS / 1000))}</p>
-          <div className="hud-strip mt-2">
-            <span className="hud-pill">{text.opsDashboard}</span>
-            <span className="hud-pill">{text.pipelineTelemetry}</span>
-            <span className="hud-pill hud-pill-live">
-              <span className="refresh-dot" />
-              {text.liveView}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="label" htmlFor="statusFilter">
-            {text.status}
-          </label>
-          <select
-            className="select w-full min-w-[150px] sm:w-[170px]"
-            id="statusFilter"
-            onChange={(event) => setStatusFilter(event.target.value as "all" | RunStatus)}
-            value={statusFilter}
-          >
-            {filterValues.map((value) => (
-              <option key={value} value={value}>
-                {statusFilterLabel(value, locale)}
-              </option>
-            ))}
-          </select>
-          <label className="label" htmlFor="runKeywordFilter">
-            {text.keyword}
-          </label>
-          <input
-            className="input w-full min-w-[220px] sm:w-[260px]"
-            id="runKeywordFilter"
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder={text.keywordPlaceholder}
-            value={keyword}
-          />
-          {keyword ? (
-            <button className="btn" onClick={() => setKeyword("")} type="button">
-              {text.clearSearch}
-            </button>
-          ) : null}
-          <button className={refreshing ? "btn btn-busy" : "btn"} disabled={refreshing} onClick={() => void loadRuns(true)} type="button">
-            {refreshing ? text.refreshing : text.refresh}
-          </button>
         </div>
       </div>
       <div className="mb-4 filter-row">
@@ -290,7 +247,7 @@ export default function RunsPage() {
           </button>
         ))}
       </div>
-      <div className="stat-grid reveal-grid mb-5">
+      <div className="stat-grid reveal-grid mb-5 md:grid-cols-2 xl:grid-cols-4">
         <article className="stat-card">
           <p className="label mb-2">{text.totalRuns}</p>
           <p className="stat-value">
@@ -316,17 +273,17 @@ export default function RunsPage() {
           </p>
         </article>
       </div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="monitor-toolbar monitor-toolbar-spread mb-4">
         <p className="text-xs text-slate-600">
           {text.lastUpdated}: {lastUpdatedAt ? formatDateTime(lastUpdatedAt, locale) : "-"}
         </p>
         <p className="text-xs text-slate-600">{text.showing(filteredRuns.length, runs.length)}</p>
-        {refreshing ? (
-          <p aria-live="polite" className="inline-flex items-center gap-2 text-xs text-emerald-700">
-            <span className="refresh-dot" />
-            {text.syncing}
-          </p>
-        ) : null}
+        <p
+          aria-live="polite"
+          className={`monitor-status ${isPageVisible ? "monitor-status-quiet" : "monitor-status-warn"}`}
+        >
+          {refreshStatusText}
+        </p>
       </div>
       {error ? (
         <p aria-live="assertive" className="notice notice-error mb-4" role="alert">
@@ -335,6 +292,19 @@ export default function RunsPage() {
       ) : null}
       {loading ? (
         <p className="text-sm text-slate-600">{text.loading}</p>
+      ) : !runs.length ? (
+        <div className="empty-state">
+          <p className="empty-state-title">{text.emptyTitle}</p>
+          <p className="empty-state-copy">{text.emptyDesc}</p>
+          <div className="empty-state-actions">
+            <Link className="btn btn-primary" href="/runs/new">
+              {text.createRun}
+            </Link>
+            <button className="btn" onClick={() => void loadRuns("manual")} type="button">
+              {text.refresh}
+            </button>
+          </div>
+        </div>
       ) : (
         <RunTable
           actionKind={actionState?.kind || null}

@@ -1,0 +1,174 @@
+{
+  "mechanism_id": "H1_H2_H3",
+  "module": "mechanism_modules.mech_ood_legal_generalization",
+  "mechanism_name": "OOD与泛化脆弱性",
+  "output_metrics": [
+    "法律综合可靠性"
+  ],
+  "metric_directions": {
+    "法律综合可靠性": "higher_better"
+  },
+  "metric_weights": {
+    "法律综合可靠性": 1.0
+  },
+  "model_metric_values": [
+    {
+      "model_id": "gpt-5.4",
+      "metrics": {
+        "法律综合可靠性": 0.3288537095088819
+      }
+    },
+    {
+      "model_id": "gpt-5.2",
+      "metrics": {
+        "法律综合可靠性": 0.30115582549634273
+      }
+    },
+    {
+      "model_id": "gpt-4o",
+      "metrics": {
+        "法律综合可靠性": 0.2718649860675723
+      }
+    },
+    {
+      "model_id": "gemini-3.1-pro",
+      "metrics": {
+        "法律综合可靠性": 0.3540803726924417
+      }
+    },
+    {
+      "model_id": "gpt-5",
+      "metrics": {
+        "法律综合可靠性": 0.04415869905956113
+      }
+    },
+    {
+      "model_id": "glm-5",
+      "metrics": {
+        "法律综合可靠性": 0.2897791274817137
+      }
+    },
+    {
+      "model_id": "grok-4.1",
+      "metrics": {
+        "法律综合可靠性": 0.2277863549285963
+      }
+    },
+    {
+      "model_id": "kimi-2.5",
+      "metrics": {
+        "法律综合可靠性": 0.0
+      }
+    },
+    {
+      "model_id": "minmax-m2.5",
+      "metrics": {
+        "法律综合可靠性": 0.28212783002438174
+      }
+    },
+    {
+      "model_id": "qwen3.5-397b",
+      "metrics": {
+        "法律综合可靠性": 0.19769035179380004
+      }
+    }
+  ],
+  "metric_rankings": [
+    {
+      "metric": "法律综合可靠性",
+      "direction": "higher_better",
+      "sorted_results": [
+        {
+          "model_id": "gemini-3.1-pro",
+          "value": 0.3540803726924417
+        },
+        {
+          "model_id": "gpt-5.4",
+          "value": 0.3288537095088819
+        },
+        {
+          "model_id": "gpt-5.2",
+          "value": 0.30115582549634273
+        },
+        {
+          "model_id": "glm-5",
+          "value": 0.2897791274817137
+        },
+        {
+          "model_id": "minmax-m2.5",
+          "value": 0.28212783002438174
+        },
+        {
+          "model_id": "gpt-4o",
+          "value": 0.2718649860675723
+        },
+        {
+          "model_id": "grok-4.1",
+          "value": 0.2277863549285963
+        },
+        {
+          "model_id": "qwen3.5-397b",
+          "value": 0.19769035179380004
+        },
+        {
+          "model_id": "gpt-5",
+          "value": 0.04415869905956113
+        },
+        {
+          "model_id": "kimi-2.5",
+          "value": 0.0
+        }
+      ]
+    }
+  ],
+  "composite_ranking": {
+    "metric": "Composite Score",
+    "direction": "higher_better",
+    "weights": {
+      "法律综合可靠性": 1.0
+    },
+    "normalization": "min_max_by_metric_then_weighted_sum",
+    "sorted_results": [
+      {
+        "model_id": "gemini-3.1-pro",
+        "value": 1.0
+      },
+      {
+        "model_id": "gpt-5.4",
+        "value": 0.9287544152991728
+      },
+      {
+        "model_id": "gpt-5.2",
+        "value": 0.8505295653818411
+      },
+      {
+        "model_id": "glm-5",
+        "value": 0.8183992952736163
+      },
+      {
+        "model_id": "minmax-m2.5",
+        "value": 0.7967903667720132
+      },
+      {
+        "model_id": "gpt-4o",
+        "value": 0.7678058628336267
+      },
+      {
+        "model_id": "grok-4.1",
+        "value": 0.6433182195231538
+      },
+      {
+        "model_id": "qwen3.5-397b",
+        "value": 0.5583205595118264
+      },
+      {
+        "model_id": "gpt-5",
+        "value": 0.12471377253637803
+      },
+      {
+        "model_id": "kimi-2.5",
+        "value": 0.0
+      }
+    ]
+  }
+}

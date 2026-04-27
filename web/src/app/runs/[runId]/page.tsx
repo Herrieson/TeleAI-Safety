@@ -10,7 +10,7 @@ import { EvaluationTaskTable } from "@/components/runs/EvaluationTaskTable";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { StageTimeline } from "@/components/runs/StageTimeline";
 import { useI18n } from "@/components/common/LocaleProvider";
-import { formatRunMode, formatStageName } from "@/lib/i18n";
+import { formatDateTime, formatRunMode, formatStageName } from "@/lib/i18n";
 import {
   ApiError,
   cancelRun,
@@ -78,6 +78,14 @@ export default function RunDetailPage() {
           evaluateThisRun: "评估此任务",
           back: "返回",
           autoRefresh: "每 3 秒自动刷新。",
+          autoRefreshOn: "自动刷新：开启",
+          autoRefreshOff: "自动刷新：暂停",
+          resumeRefresh: "恢复轮询",
+          pauseRefresh: "暂停轮询",
+          refreshPausedHidden: "页面隐藏时已暂停自动刷新。",
+          refreshPausedManual: "自动刷新已暂停，仅保留手动刷新。",
+          refreshHealthy: "自动刷新正常运行。",
+          lastUpdated: "最近同步",
           syncingStatus: "正在同步任务状态...",
           stageSnapshot: "阶段快照",
           totalStages: "总阶段数",
@@ -132,6 +140,14 @@ export default function RunDetailPage() {
           evaluateThisRun: "Evaluate This Run",
           back: "Back",
           autoRefresh: "Auto refresh every 3s.",
+          autoRefreshOn: "Auto refresh: on",
+          autoRefreshOff: "Auto refresh: paused",
+          resumeRefresh: "Resume polling",
+          pauseRefresh: "Pause polling",
+          refreshPausedHidden: "Auto refresh is paused while the page is hidden.",
+          refreshPausedManual: "Auto refresh is paused. Manual refresh stays available.",
+          refreshHealthy: "Auto refresh is running normally.",
+          lastUpdated: "Last sync",
           syncingStatus: "syncing run status...",
           stageSnapshot: "Stage Snapshot",
           totalStages: "Total Stages",
@@ -195,6 +211,10 @@ export default function RunDetailPage() {
   const [startingEvaluate, setStartingEvaluate] = useState(false);
   const [evaluateProfile, setEvaluateProfile] = useState("full");
   const [isPageVisible, setIsPageVisible] = useState(true);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [cancelingRun, setCancelingRun] = useState(false);
+  const [lastRunUpdatedAt, setLastRunUpdatedAt] = useState<number | null>(null);
+  const [lastLogsUpdatedAt, setLastLogsUpdatedAt] = useState<number | null>(null);
   const runLoadingRef = useRef(false);
   const logsLoadingRef = useRef(false);
 
@@ -215,6 +235,7 @@ export default function RunDetailPage() {
     try {
       const row = await getRun(runId);
       setRun(row);
+      setLastRunUpdatedAt(Date.now());
       setSelectedStage((prev) => {
         if (row.stages.some((stage) => stage.stage === prev)) {
           return prev;
@@ -243,6 +264,7 @@ export default function RunDetailPage() {
     try {
       const row = await getRunLogs(runId, selectedStage, tailLines);
       setLogs(row);
+      setLastLogsUpdatedAt(Date.now());
       setError("");
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err);
@@ -293,25 +315,31 @@ export default function RunDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (!isPageVisible || !isRunning) {
+    if (!isPageVisible || !isRunning || !autoRefreshEnabled) {
       return;
     }
     const timer = setInterval(() => {
       void loadRun(true);
     }, 3000);
     return () => clearInterval(timer);
-  }, [isPageVisible, isRunning, loadRun]);
+  }, [autoRefreshEnabled, isPageVisible, isRunning, loadRun]);
 
   useEffect(() => {
-    if (tab !== "logs" || !isPageVisible) {
+    if (tab !== "logs") {
       return;
     }
     void loadLogs(false);
+  }, [tab, loadLogs]);
+
+  useEffect(() => {
+    if (tab !== "logs" || !isPageVisible || !autoRefreshEnabled || !isRunning) {
+      return;
+    }
     const timer = setInterval(() => {
       void loadLogs(true);
     }, 3000);
     return () => clearInterval(timer);
-  }, [isPageVisible, tab, loadLogs]);
+  }, [autoRefreshEnabled, isPageVisible, isRunning, loadLogs, tab]);
 
   useEffect(() => {
     if (tab === "artifacts") {
@@ -401,12 +429,15 @@ export default function RunDetailPage() {
     if (!run) {
       return;
     }
+    setCancelingRun(true);
     try {
       await cancelRun(run.run_id);
       await loadRun(true);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err);
       setError(message);
+    } finally {
+      setCancelingRun(false);
     }
   }
 
@@ -473,6 +504,12 @@ export default function RunDetailPage() {
     );
   }
 
+  const refreshStatusText = !autoRefreshEnabled
+    ? text.refreshPausedManual
+    : !isPageVisible
+      ? text.refreshPausedHidden
+      : text.refreshHealthy;
+
   return (
     <section aria-busy={loading || runRefreshing || logsRefreshing || metricsLoading} className="space-y-4">
       <div className="panel p-5">
@@ -493,14 +530,14 @@ export default function RunDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <RunStatusBadge status={run.status} />
             {isRunning ? (
-              <button className={runRefreshing ? "btn btn-busy" : "btn"} disabled={runRefreshing} onClick={() => void handleCancel()} type="button">
-                {runRefreshing ? text.canceling : text.cancel}
+              <button className={cancelingRun ? "btn btn-busy" : "btn"} disabled={cancelingRun} onClick={() => void handleCancel()} type="button">
+                {cancelingRun ? text.canceling : text.cancel}
               </button>
             ) : null}
             {canEvaluateFromRun ? (
               <>
                 <select
-                  className="select w-[120px]"
+                  className="select w-full sm:w-[120px]"
                   onChange={(event) => setEvaluateProfile(event.target.value)}
                   value={evaluateProfile}
                 >
@@ -517,14 +554,41 @@ export default function RunDetailPage() {
             </Link>
           </div>
         </div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="monitor-toolbar monitor-toolbar-spread mb-3">
           <p className="text-xs text-slate-600">{text.autoRefresh}</p>
-          {runRefreshing ? (
-            <p className="inline-flex items-center gap-2 text-xs text-emerald-700">
-              <span className="refresh-dot" />
-              {text.syncingStatus}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className={autoRefreshEnabled ? "btn btn-primary" : "btn"}
+              onClick={() => setAutoRefreshEnabled((value) => !value)}
+              type="button"
+            >
+              {autoRefreshEnabled ? text.pauseRefresh : text.resumeRefresh}
+            </button>
+            <button className={runRefreshing ? "btn btn-busy" : "btn"} disabled={runRefreshing} onClick={() => void loadRun(true)} type="button">
+              {runRefreshing ? text.refreshing : text.refresh}
+            </button>
+          </div>
+        </div>
+        <div className="meta-grid mb-3">
+          <article className="stat-card">
+            <p className="label mb-2">{text.lastUpdated}</p>
+            <p className="text-sm text-slate-600">{lastRunUpdatedAt ? formatDateTime(lastRunUpdatedAt, locale) : "-"}</p>
+          </article>
+          <article className="stat-card">
+            <p className="label mb-2">{text.tabs[tab]}</p>
+            <p className="text-sm text-slate-600">{tab === "logs" ? `${text.stage}: ${formatStageName(selectedStage, locale)}` : text.runDetail}</p>
+          </article>
+          <article className="stat-card">
+            <p className="label mb-2">{autoRefreshEnabled ? text.autoRefreshOn : text.autoRefreshOff}</p>
+            <p
+              className={`monitor-status ${
+                runRefreshing ? "monitor-status-good" : autoRefreshEnabled && isPageVisible ? "monitor-status-quiet" : "monitor-status-warn"
+              }`}
+            >
+              {runRefreshing ? <span className="refresh-dot" /> : null}
+              {runRefreshing ? text.syncingStatus : refreshStatusText}
             </p>
-          ) : null}
+          </article>
         </div>
         {run.error ? (
           <p aria-live="assertive" className="notice notice-error mb-3" role="alert">
@@ -536,10 +600,10 @@ export default function RunDetailPage() {
             {error}
           </p>
         ) : null}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1">
           {(["overview", "logs", "artifacts", "metrics"] as DetailTab[]).map((item) => (
             <button
-              className={tab === item ? "tab-btn tab-btn-active" : "tab-btn"}
+              className={tab === item ? "tab-btn tab-btn-active shrink-0" : "tab-btn shrink-0"}
               key={item}
               onClick={() => setTab(item)}
               type="button"
@@ -633,12 +697,12 @@ export default function RunDetailPage() {
 
       {tab === "logs" ? (
         <article className="panel p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="monitor-toolbar mb-3">
             <label className="label" htmlFor="stageSelector">
               {text.stage}
             </label>
             <select
-              className="select w-[180px]"
+              className="select w-full sm:w-[180px]"
               id="stageSelector"
               onChange={(event) => setSelectedStage(event.target.value)}
               value={selectedStage}
@@ -653,7 +717,7 @@ export default function RunDetailPage() {
               {text.tailLines}
             </label>
             <select
-              className="select w-[140px]"
+              className="select w-full sm:w-[140px]"
               id="tailLines"
               onChange={(event) => setTailLines(Number(event.target.value))}
               value={tailLines}
@@ -666,12 +730,15 @@ export default function RunDetailPage() {
             <button className={logsRefreshing ? "btn btn-busy" : "btn"} disabled={logsRefreshing} onClick={() => void loadLogs(true)} type="button">
               {logsRefreshing ? text.refreshing : text.refresh}
             </button>
-            {logsRefreshing ? (
-              <p aria-live="polite" className="inline-flex items-center gap-2 text-xs text-emerald-700">
-                <span className="refresh-dot" />
-                {text.syncingLogs}
-              </p>
-            ) : null}
+            <p
+              aria-live="polite"
+              className={`monitor-status ${
+                logsRefreshing ? "monitor-status-good" : autoRefreshEnabled && isPageVisible && isRunning ? "monitor-status-quiet" : "monitor-status-warn"
+              }`}
+            >
+              {logsRefreshing ? <span className="refresh-dot" /> : null}
+              {logsRefreshing ? text.syncingLogs : `${text.lastUpdated}: ${lastLogsUpdatedAt ? formatDateTime(lastLogsUpdatedAt, locale) : "-"}`}
+            </p>
           </div>
           <p className="label mb-2">{text.logPath}</p>
           <p className="mono mb-3 text-xs text-slate-700">{logs?.log_path || "-"}</p>
